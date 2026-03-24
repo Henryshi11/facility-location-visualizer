@@ -8,16 +8,18 @@ export const MODEL_INFO = {
   [MODELS.PMEDIAN]: {
     name: 'p-Median',
     description: 'Minimize weighted total distance',
-    metric: 'Weighted Distance',
+    short: 'Weighted total distance minimization',
   },
+
   [MODELS.PCENTER]: {
     name: 'p-Center',
-    description: 'Minimize maximum distance',
-    metric: 'Max Distance',
+    description: 'Minimize the maximum distance to the nearest facility',
+    short: 'Worst-case distance minimization',
   },
+
   [MODELS.SETCOVER]: {
     name: 'Set Covering',
-    description: 'Cover all nodes within radius',
-    metric: 'Coverage',
+    description: 'Cover all demand nodes using radius-based facility coverage',
+    short: 'Radius-based covering',
   },
 };

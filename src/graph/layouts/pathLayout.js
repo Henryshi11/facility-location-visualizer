@@ -1,21 +1,32 @@
 export function applyPathLayout(nodes, edges) {
+  const marginX = 80;
+  const usableWidth = 1120;
+  const y = 280;
+
+  const totalLength = edges.reduce((sum, edge) => sum + (edge.length ?? 1), 0);
+
+  let currentX = marginX;
+
   const laidOutNodes = nodes.map((node, index) => {
-    const row = Math.floor(index / 6);
-    const col = index % 6;
-
-    const y = 140 + row * 180;
-    const x = row % 2 === 0 ? 140 + col * 140 : 860 - col * 140;
-
-    return {
+    const laidOutNode = {
       ...node,
-      x,
+      x: currentX,
       y,
     };
+
+    const nextEdge = edges[index];
+    if (nextEdge) {
+      const edgeLength = nextEdge.length ?? 1;
+      const spacing =
+        totalLength > 0 ? (edgeLength / totalLength) * usableWidth : usableWidth / Math.max(1, edges.length);
+      currentX += spacing;
+    }
+
+    return laidOutNode;
   });
 
   return {
     nodes: laidOutNodes,
     edges,
-    type: 'path',
   };
 }

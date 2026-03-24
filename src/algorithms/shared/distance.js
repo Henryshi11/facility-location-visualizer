@@ -1,28 +1,40 @@
-// Floyd-Warshall
 export function computeDistanceMatrix(nodes, edges) {
+  const nodeIds = nodes.map((node) => node.id);
   const dist = {};
 
-  nodes.forEach(n1 => {
-    dist[n1.id] = {};
-    nodes.forEach(n2 => {
-      dist[n1.id][n2.id] = n1.id === n2.id ? 0 : Infinity;
-    });
-  });
+  for (const fromId of nodeIds) {
+    dist[fromId] = {};
+    for (const toId of nodeIds) {
+      dist[fromId][toId] = fromId === toId ? 0 : Infinity;
+    }
+  }
 
-  edges.forEach(e => {
-    dist[e.u][e.v] = e.length;
-    dist[e.v][e.u] = e.length;
-  });
+  for (const edge of edges) {
+    const u = edge.u;
+    const v = edge.v;
+    const length = edge.length ?? 1;
 
-  nodes.forEach(k => {
-    nodes.forEach(i => {
-      nodes.forEach(j => {
-        if (dist[i.id][k.id] + dist[k.id][j.id] < dist[i.id][j.id]) {
-          dist[i.id][j.id] = dist[i.id][k.id] + dist[k.id][j.id];
+    if (!dist[u]) dist[u] = {};
+    if (!dist[v]) dist[v] = {};
+
+    dist[u][v] = Math.min(dist[u][v] ?? Infinity, length);
+    dist[v][u] = Math.min(dist[v][u] ?? Infinity, length);
+  }
+
+  for (const k of nodeIds) {
+    for (const i of nodeIds) {
+      for (const j of nodeIds) {
+        const throughK = (dist[i][k] ?? Infinity) + (dist[k][j] ?? Infinity);
+        if (throughK < (dist[i][j] ?? Infinity)) {
+          dist[i][j] = throughK;
         }
-      });
-    });
-  });
+      }
+    }
+  }
 
   return dist;
+}
+
+export function getDistance(distMatrix, fromId, toId) {
+  return distMatrix?.[fromId]?.[toId] ?? Infinity;
 }

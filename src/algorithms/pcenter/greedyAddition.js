@@ -1,15 +1,22 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
-import { getAssignments } from '../shared/assignments';
+import {
+  computeMaxAssignmentDistance,
+  getAssignments,
+} from '../shared/assignments';
 
-function computeMaxDistance(nodes, assignments) {
-  if (!assignments || Object.keys(assignments).length === 0) return Infinity;
-
-  return nodes.reduce((maxValue, node) => {
-    const assignment = assignments[node.id];
-    if (!assignment) return maxValue;
-    return Math.max(maxValue, assignment.distance);
-  }, 0);
+function buildScoreboard(candidates, bestId) {
+  return candidates
+    .slice()
+    .sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      return String(a.id).localeCompare(String(b.id));
+    })
+    .map((item) => ({
+      id: item.id,
+      score: item.score,
+      isBest: item.id === bestId,
+    }));
 }
 
 export function generatePCenterGreedySteps(graph, params = {}) {
@@ -18,13 +25,12 @@ export function generatePCenterGreedySteps(graph, params = {}) {
 
   const steps = [];
   const selected = [];
-  let unselected = nodes.map((n) => n.id);
 
   steps.push(
     createSnapshot({
       type: STEP_TYPES.INIT,
+      phase: 'init',
       selected: [],
-      evaluating: null,
       assignments: {},
       scoreboard: [],
       metrics: {
@@ -34,145 +40,157 @@ export function generatePCenterGreedySteps(graph, params = {}) {
       },
       explanation:
         `Initializing greedy p-Center.\n` +
-        `Goal: choose ${p} facilities to minimize the maximum service distance.\n` +
-        `Heuristic note: this is a greedy teaching algorithm, not an exact solver.`,
+        `Goal: choose ${p} facilities to minimize the worst-case distance.\n` +
+        `Greedy rule: at each round, add the facility that gives the best immediate maximum distance.`,
     })
   );
 
   for (let round = 1; round <= p; round++) {
-    let bestCandidate = null;
-    let bestMaxDistance = Infinity;
-    let bestAssignments = {};
-    let currentScoreboard = [];
-
-    const currentAssignments =
-      selected.length > 0 ? getAssignments(nodes, selected, distMatrix) : {};
-
-    const currentMaxDistance =
-      selected.length > 0
-        ? computeMaxDistance(nodes, currentAssignments)
-        : Infinity;
+    const candidates = [];
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.ROUND_START,
+        phase: 'round_start',
         selected: [...selected],
-        evaluating: null,
-        assignments: currentAssignments,
+        assignments: getAssignments(nodes, selected, distMatrix),
         scoreboard: [],
         metrics: {
-          maxDistance: currentMaxDistance,
+          maxDistance:
+            selected.length > 0
+              ? computeMaxAssignmentDistance(
+                  nodes,
+                  getAssignments(nodes, selected, distMatrix)
+                )
+              : Infinity,
           round,
           p,
         },
         explanation:
           `--- Round ${round} of ${p} ---\n` +
-          `Scan every remaining node as a candidate facility.\n` +
-          `For each candidate, compute the worst-case distance from any node to its nearest facility.`,
+          `Try every unselected node as the next facility and compare the resulting worst-case distance.`,
       })
     );
 
-    for (const candidateId of unselected) {
-      const trialFacilities = [...selected, candidateId];
-      const trialAssignments = getAssignments(nodes, trialFacilities, distMatrix);
-      const trialMaxDistance = computeMaxDistance(nodes, trialAssignments);
+    for (const node of nodes) {
+      if (selected.includes(node.id)) continue;
 
-      currentScoreboard.push({
-        id: candidateId,
-        score: trialMaxDistance,
-        isBest: false,
+      const trialFacilities = [...selected, node.id];
+      const assignments = getAssignments(nodes, trialFacilities, distMatrix);
+      const maxDistance = computeMaxAssignmentDistance(nodes, assignments);
+
+      candidates.push({
+        id: node.id,
+        score: maxDistance,
+        assignments,
       });
 
-      if (trialMaxDistance < bestMaxDistance) {
-        bestMaxDistance = trialMaxDistance;
-        bestCandidate = candidateId;
-        bestAssignments = trialAssignments;
-      }
-
-      currentScoreboard = currentScoreboard.map((item) => ({
-        ...item,
-        isBest: item.id === bestCandidate,
-      }));
+      const currentBest =
+        candidates.reduce((best, item) => {
+          if (!best) return item;
+          if (item.score < best.score) return item;
+          if (item.score === best.score) {
+            return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+          }
+          return best;
+        }, null)?.id ?? null;
 
       steps.push(
         createSnapshot({
           type: STEP_TYPES.EVALUATE,
+          phase: 'evaluate_candidate',
           selected: [...selected],
-          evaluating: candidateId,
-          assignments: trialAssignments,
-          scoreboard: [...currentScoreboard],
+          evaluating: node.id,
+          currentBest,
+          assignments,
+          scoreboard: buildScoreboard(candidates, currentBest),
           metrics: {
-            maxDistance: trialMaxDistance,
+            maxDistance,
             round,
             p,
           },
           explanation:
-            `Evaluating node ${candidateId}.\n` +
-            `If selected now, the worst-case distance becomes ${trialMaxDistance.toFixed(0)}.`,
+            `Evaluate candidate ${node.id}.\n` +
+            `If selected next, the maximum assignment distance becomes ${maxDistance.toFixed(0)}.`,
         })
       );
     }
 
-    steps.push(
-      createSnapshot({
-        type: STEP_TYPES.ROUND_SUMMARY,
-        selected: [...selected],
-        evaluating: bestCandidate,
-        assignments: bestAssignments,
-        scoreboard: [...currentScoreboard],
-        metrics: {
-          maxDistance: bestMaxDistance,
-          round,
-          p,
-        },
-        explanation:
-          `Round ${round} complete.\n` +
-          `Best candidate: ${bestCandidate}.\n` +
-          `Lowest worst-case distance found this round: ${bestMaxDistance.toFixed(0)}.`,
-      })
-    );
+    const bestCandidate = candidates.reduce((best, item) => {
+      if (!best) return item;
+      if (item.score < best.score) return item;
+      if (item.score === best.score) {
+        return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+      }
+      return best;
+    }, null);
 
-    selected.push(bestCandidate);
-    unselected = unselected.filter((id) => id !== bestCandidate);
+    if (!bestCandidate) {
+      steps.push(
+        createSnapshot({
+          type: STEP_TYPES.NO_PROGRESS,
+          phase: 'no_progress',
+          selected: [...selected],
+          assignments: getAssignments(nodes, selected, distMatrix),
+          scoreboard: [],
+          metrics: {
+            maxDistance:
+              selected.length > 0
+                ? computeMaxAssignmentDistance(
+                    nodes,
+                    getAssignments(nodes, selected, distMatrix)
+                  )
+                : Infinity,
+            round,
+            p,
+          },
+          explanation: `No valid candidate remained. The algorithm stops early.`,
+        })
+      );
+      break;
+    }
+
+    selected.push(bestCandidate.id);
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.SELECT,
+        phase: 'select_candidate',
         selected: [...selected],
-        evaluating: null,
-        assignments: bestAssignments,
-        scoreboard: [...currentScoreboard],
+        currentBest: bestCandidate.id,
+        assignments: bestCandidate.assignments,
+        scoreboard: buildScoreboard(candidates, bestCandidate.id),
         metrics: {
-          maxDistance: bestMaxDistance,
+          maxDistance: bestCandidate.score,
           round,
           p,
         },
         explanation:
-          `Lock in node ${bestCandidate} as a facility.\n` +
-          `Selected facilities so far: ${selected.join(', ')}.`,
+          `Select node ${bestCandidate.id} as the next facility.\n` +
+          `Current facility set: { ${selected.join(', ')} }.\n` +
+          `Current maximum assignment distance: ${bestCandidate.score.toFixed(0)}.`,
       })
     );
   }
 
   const finalAssignments = getAssignments(nodes, selected, distMatrix);
-  const finalMaxDistance = computeMaxDistance(nodes, finalAssignments);
+  const finalMaxDistance = computeMaxAssignmentDistance(nodes, finalAssignments);
 
   steps.push(
     createSnapshot({
       type: STEP_TYPES.FINISH,
+      phase: 'finish',
       selected: [...selected],
-      evaluating: null,
       assignments: finalAssignments,
-      scoreboard: [],
       metrics: {
         maxDistance: finalMaxDistance,
-        round: p,
+        round: selected.length,
         p,
       },
       explanation:
         `Greedy p-Center finished.\n` +
-        `Final facilities: ${selected.join(', ')}.\n` +
-        `Final worst-case distance: ${finalMaxDistance.toFixed(0)}.`,
+        `Final facilities: { ${selected.join(', ')} }.\n` +
+        `Final maximum assignment distance: ${finalMaxDistance.toFixed(0)}.`,
     })
   );
 

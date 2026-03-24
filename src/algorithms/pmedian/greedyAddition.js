@@ -1,13 +1,22 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
-import { getAssignments } from '../shared/assignments';
+import {
+  computeWeightedObjective,
+  getAssignments,
+} from '../shared/assignments';
 
-function computeWeightedObjective(nodes, assignments) {
-  return nodes.reduce((sum, node) => {
-    const assignment = assignments[node.id];
-    if (!assignment) return sum;
-    return sum + assignment.distance * node.weight;
-  }, 0);
+function buildScoreboard(candidates, bestId) {
+  return candidates
+    .slice()
+    .sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      return String(a.id).localeCompare(String(b.id));
+    })
+    .map((item) => ({
+      id: item.id,
+      score: item.score,
+      isBest: item.id === bestId,
+    }));
 }
 
 export function generatePMedianGreedySteps(graph, params = {}) {
@@ -16,13 +25,12 @@ export function generatePMedianGreedySteps(graph, params = {}) {
 
   const steps = [];
   const selected = [];
-  let unselected = nodes.map((n) => n.id);
 
   steps.push(
     createSnapshot({
       type: STEP_TYPES.INIT,
+      phase: 'init',
       selected: [],
-      evaluating: null,
       assignments: {},
       scoreboard: [],
       metrics: {
@@ -33,122 +41,136 @@ export function generatePMedianGreedySteps(graph, params = {}) {
       explanation:
         `Initializing greedy p-Median.\n` +
         `Goal: choose ${p} facilities to minimize weighted total distance.\n` +
-        `Heuristic note: this is a greedy teaching algorithm, not an exact solver.`,
+        `Greedy rule: at each round, add the facility that gives the best immediate objective value.`,
     })
   );
 
   for (let round = 1; round <= p; round++) {
-    let bestCandidate = null;
-    let bestObjective = Infinity;
-    let bestAssignments = {};
-    let currentScoreboard = [];
-
-    const currentAssignments =
-      selected.length > 0 ? getAssignments(nodes, selected, distMatrix) : {};
-
-    const currentObjective =
-      selected.length > 0
-        ? computeWeightedObjective(nodes, currentAssignments)
-        : Infinity;
+    const candidates = [];
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.ROUND_START,
+        phase: 'round_start',
         selected: [...selected],
-        evaluating: null,
-        assignments: currentAssignments,
+        assignments: getAssignments(nodes, selected, distMatrix),
         scoreboard: [],
         metrics: {
-          objective: currentObjective,
+          objective:
+            selected.length > 0
+              ? computeWeightedObjective(
+                  nodes,
+                  getAssignments(nodes, selected, distMatrix)
+                )
+              : Infinity,
           round,
           p,
         },
         explanation:
           `--- Round ${round} of ${p} ---\n` +
-          `Scan every remaining node as a candidate facility.\n` +
-          `For each candidate, compute:\n` +
-          `sum( node weight × distance to nearest selected facility ).`,
+          `Try every unselected node as the next facility and compare the resulting objective.`,
       })
     );
 
-    for (const candidateId of unselected) {
-      const trialFacilities = [...selected, candidateId];
-      const trialAssignments = getAssignments(nodes, trialFacilities, distMatrix);
-      const trialObjective = computeWeightedObjective(nodes, trialAssignments);
+    for (const node of nodes) {
+      if (selected.includes(node.id)) continue;
 
-      currentScoreboard.push({
-        id: candidateId,
-        score: trialObjective,
-        isBest: false,
+      const trialFacilities = [...selected, node.id];
+      const assignments = getAssignments(nodes, trialFacilities, distMatrix);
+      const objective = computeWeightedObjective(nodes, assignments);
+
+      candidates.push({
+        id: node.id,
+        score: objective,
+        assignments,
       });
 
-      if (trialObjective < bestObjective) {
-        bestObjective = trialObjective;
-        bestCandidate = candidateId;
-        bestAssignments = trialAssignments;
-      }
-
-      currentScoreboard = currentScoreboard.map((item) => ({
-        ...item,
-        isBest: item.id === bestCandidate,
-      }));
+      const currentBest =
+        candidates.length === 0
+          ? null
+          : candidates.reduce((best, item) => {
+              if (!best) return item;
+              if (item.score < best.score) return item;
+              if (item.score === best.score) {
+                return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+              }
+              return best;
+            }, null)?.id ?? null;
 
       steps.push(
         createSnapshot({
           type: STEP_TYPES.EVALUATE,
+          phase: 'evaluate_candidate',
           selected: [...selected],
-          evaluating: candidateId,
-          assignments: trialAssignments,
-          scoreboard: [...currentScoreboard],
+          evaluating: node.id,
+          currentBest,
+          assignments,
+          scoreboard: buildScoreboard(candidates, currentBest),
           metrics: {
-            objective: trialObjective,
+            objective,
             round,
             p,
           },
           explanation:
-            `Evaluating node ${candidateId}.\n` +
-            `If selected now, the weighted total distance becomes ${trialObjective.toFixed(0)}.`,
+            `Evaluate candidate ${node.id}.\n` +
+            `If selected next, the weighted total distance becomes ${objective.toFixed(0)}.`,
         })
       );
     }
 
-    steps.push(
-      createSnapshot({
-        type: STEP_TYPES.ROUND_SUMMARY,
-        selected: [...selected],
-        evaluating: bestCandidate,
-        assignments: bestAssignments,
-        scoreboard: [...currentScoreboard],
-        metrics: {
-          objective: bestObjective,
-          round,
-          p,
-        },
-        explanation:
-          `Round ${round} complete.\n` +
-          `Best candidate: ${bestCandidate}.\n` +
-          `Lowest weighted total distance found this round: ${bestObjective.toFixed(0)}.`,
-      })
-    );
+    const bestCandidate = candidates.reduce((best, item) => {
+      if (!best) return item;
+      if (item.score < best.score) return item;
+      if (item.score === best.score) {
+        return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+      }
+      return best;
+    }, null);
 
-    selected.push(bestCandidate);
-    unselected = unselected.filter((id) => id !== bestCandidate);
+    if (!bestCandidate) {
+      steps.push(
+        createSnapshot({
+          type: STEP_TYPES.NO_PROGRESS,
+          phase: 'no_progress',
+          selected: [...selected],
+          assignments: getAssignments(nodes, selected, distMatrix),
+          scoreboard: [],
+          metrics: {
+            objective:
+              selected.length > 0
+                ? computeWeightedObjective(
+                    nodes,
+                    getAssignments(nodes, selected, distMatrix)
+                  )
+                : Infinity,
+            round,
+            p,
+          },
+          explanation: `No valid candidate remained. The algorithm stops early.`,
+        })
+      );
+      break;
+    }
+
+    selected.push(bestCandidate.id);
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.SELECT,
+        phase: 'select_candidate',
         selected: [...selected],
-        evaluating: null,
-        assignments: bestAssignments,
-        scoreboard: [...currentScoreboard],
+        currentBest: bestCandidate.id,
+        assignments: bestCandidate.assignments,
+        scoreboard: buildScoreboard(candidates, bestCandidate.id),
         metrics: {
-          objective: bestObjective,
+          objective: bestCandidate.score,
           round,
           p,
         },
         explanation:
-          `Lock in node ${bestCandidate} as a facility.\n` +
-          `Selected facilities so far: ${selected.join(', ')}.`,
+          `Select node ${bestCandidate.id} as the next facility.\n` +
+          `Current facility set: { ${selected.join(', ')} }.\n` +
+          `Current weighted total distance: ${bestCandidate.score.toFixed(0)}.`,
       })
     );
   }
@@ -159,18 +181,18 @@ export function generatePMedianGreedySteps(graph, params = {}) {
   steps.push(
     createSnapshot({
       type: STEP_TYPES.FINISH,
+      phase: 'finish',
       selected: [...selected],
-      evaluating: null,
       assignments: finalAssignments,
       scoreboard: [],
       metrics: {
         objective: finalObjective,
-        round: p,
+        round: selected.length,
         p,
       },
       explanation:
         `Greedy p-Median finished.\n` +
-        `Final facilities: ${selected.join(', ')}.\n` +
+        `Final facilities: { ${selected.join(', ')} }.\n` +
         `Final weighted total distance: ${finalObjective.toFixed(0)}.`,
     })
   );

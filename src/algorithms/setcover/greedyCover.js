@@ -1,5 +1,20 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
+import { computeCoveredNodes } from '../shared/assignments';
+
+function buildScoreboard(candidates, bestId) {
+  return candidates
+    .slice()
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return String(a.id).localeCompare(String(b.id));
+    })
+    .map((item) => ({
+      id: item.id,
+      score: item.score,
+      isBest: item.id === bestId,
+    }));
+}
 
 export function generateSetCoverGreedySteps(graph, params = {}) {
   const { nodes, distMatrix } = graph;
@@ -7,16 +22,14 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
 
   const steps = [];
   const selected = [];
-  const coveredIds = new Set();
-  let unselected = nodes.map((n) => n.id);
+  let covered = [];
 
   steps.push(
     createSnapshot({
       type: STEP_TYPES.INIT,
+      phase: 'init',
       selected: [],
-      evaluating: null,
       covered: [],
-      evalCovered: [],
       scoreboard: [],
       metrics: {
         coveredCount: 0,
@@ -24,171 +37,152 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
         radius,
       },
       explanation:
-        `Initializing greedy Set Covering.\n` +
-        `Goal: cover all nodes within radius ${radius} using as few facilities as possible.\n` +
-        `Heuristic note: this is a greedy teaching algorithm, not an exact solver.`,
+        `Initializing greedy covering.\n` +
+        `Goal: cover all demand nodes using radius ${radius}.\n` +
+        `Greedy rule: at each round, choose the facility that covers the most currently uncovered nodes.`,
     })
   );
 
-  let round = 1;
-
-  while (coveredIds.size < nodes.length && unselected.length > 0) {
-    let bestCandidate = null;
-    let bestNewlyCovered = [];
-    let currentScoreboard = [];
+  while (covered.length < nodes.length) {
+    const uncoveredSet = new Set(nodes.map((n) => n.id).filter((id) => !covered.includes(id)));
+    const candidates = [];
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.ROUND_START,
+        phase: 'round_start',
         selected: [...selected],
-        evaluating: null,
-        covered: Array.from(coveredIds),
-        evalCovered: [],
+        covered: [...covered],
         scoreboard: [],
         metrics: {
-          coveredCount: coveredIds.size,
+          coveredCount: covered.length,
           total: nodes.length,
           radius,
-          round,
         },
         explanation:
-          `--- Round ${round} ---\n` +
-          `Scan every remaining node as a candidate facility.\n` +
-          `Choose the node that covers the most currently uncovered nodes within radius ${radius}.`,
+          `A new covering round begins.\n` +
+          `Currently covered: ${covered.length} of ${nodes.length} nodes.`,
       })
     );
 
-    for (const candidateId of unselected) {
-      const newlyCovered = nodes.filter(
-        (node) =>
-          !coveredIds.has(node.id) && distMatrix[candidateId][node.id] <= radius
-      );
+    for (const node of nodes) {
+      if (selected.includes(node.id)) continue;
 
-      currentScoreboard.push({
-        id: candidateId,
-        score: newlyCovered.length,
-        isBest: false,
-      });
+      const trialSelected = [...selected, node.id];
+      const trialCovered = computeCoveredNodes(nodes, trialSelected, distMatrix, radius);
 
-      if (newlyCovered.length > bestNewlyCovered.length) {
-        bestNewlyCovered = newlyCovered;
-        bestCandidate = candidateId;
+      let newlyCoveredCount = 0;
+      for (const id of trialCovered) {
+        if (uncoveredSet.has(id)) newlyCoveredCount += 1;
       }
 
-      currentScoreboard = currentScoreboard.map((item) => ({
-        ...item,
-        isBest: item.id === bestCandidate,
-      }));
+      candidates.push({
+        id: node.id,
+        score: newlyCoveredCount,
+        covered: trialCovered,
+      });
+
+      const currentBest =
+        candidates.reduce((best, item) => {
+          if (!best) return item;
+          if (item.score > best.score) return item;
+          if (item.score === best.score) {
+            return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+          }
+          return best;
+        }, null)?.id ?? null;
 
       steps.push(
         createSnapshot({
           type: STEP_TYPES.EVALUATE,
+          phase: 'evaluate_candidate',
           selected: [...selected],
-          evaluating: candidateId,
-          covered: Array.from(coveredIds),
-          evalCovered: newlyCovered.map((n) => n.id),
-          scoreboard: [...currentScoreboard],
+          evaluating: node.id,
+          currentBest,
+          covered: [...covered],
+          evalCovered: trialCovered,
+          scoreboard: buildScoreboard(candidates, currentBest),
           metrics: {
-            coveredCount: coveredIds.size + newlyCovered.length,
+            coveredCount: covered.length,
             total: nodes.length,
+            candidateGain: newlyCoveredCount,
             radius,
-            round,
           },
           explanation:
-            `Evaluating node ${candidateId}.\n` +
-            `It would newly cover ${newlyCovered.length} uncovered node(s) within radius ${radius}.`,
+            `Evaluate candidate ${node.id}.\n` +
+            `It would newly cover ${newlyCoveredCount} currently uncovered node(s).`,
         })
       );
     }
 
-    if (bestNewlyCovered.length === 0) {
+    const bestCandidate = candidates.reduce((best, item) => {
+      if (!best) return item;
+      if (item.score > best.score) return item;
+      if (item.score === best.score) {
+        return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+      }
+      return best;
+    }, null);
+
+    if (!bestCandidate || bestCandidate.score <= 0) {
       steps.push(
         createSnapshot({
           type: STEP_TYPES.NO_PROGRESS,
+          phase: 'no_progress',
           selected: [...selected],
-          evaluating: null,
-          covered: Array.from(coveredIds),
-          evalCovered: [],
-          scoreboard: [...currentScoreboard],
+          covered: [...covered],
+          scoreboard: buildScoreboard(candidates, null),
           metrics: {
-            coveredCount: coveredIds.size,
+            coveredCount: covered.length,
             total: nodes.length,
             radius,
-            round,
           },
           explanation:
-            `No remaining candidate can cover any new uncovered node within radius ${radius}.\n` +
-            `The greedy process stops here.`,
+            `No candidate can cover any new node.\n` +
+            `The greedy covering algorithm stops without full coverage.`,
         })
       );
       break;
     }
 
-    steps.push(
-      createSnapshot({
-        type: STEP_TYPES.ROUND_SUMMARY,
-        selected: [...selected],
-        evaluating: bestCandidate,
-        covered: Array.from(coveredIds),
-        evalCovered: bestNewlyCovered.map((n) => n.id),
-        scoreboard: [...currentScoreboard],
-        metrics: {
-          coveredCount: coveredIds.size + bestNewlyCovered.length,
-          total: nodes.length,
-          radius,
-          round,
-        },
-        explanation:
-          `Round ${round} complete.\n` +
-          `Best candidate: ${bestCandidate}.\n` +
-          `It covers ${bestNewlyCovered.length} new node(s).`,
-      })
-    );
-
-    selected.push(bestCandidate);
-    bestNewlyCovered.forEach((node) => coveredIds.add(node.id));
-    unselected = unselected.filter((id) => id !== bestCandidate);
+    selected.push(bestCandidate.id);
+    covered = [...bestCandidate.covered];
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.SELECT,
+        phase: 'select_candidate',
         selected: [...selected],
-        evaluating: null,
-        covered: Array.from(coveredIds),
-        evalCovered: [],
-        scoreboard: [...currentScoreboard],
+        currentBest: bestCandidate.id,
+        covered: [...covered],
+        scoreboard: buildScoreboard(candidates, bestCandidate.id),
         metrics: {
-          coveredCount: coveredIds.size,
+          coveredCount: covered.length,
           total: nodes.length,
           radius,
-          round,
         },
         explanation:
-          `Lock in node ${bestCandidate} as a covering facility.\n` +
-          `Covered nodes so far: ${coveredIds.size}/${nodes.length}.`,
+          `Select node ${bestCandidate.id} as a covering facility.\n` +
+          `Covered nodes so far: ${covered.length}/${nodes.length}.`,
       })
     );
-
-    round += 1;
   }
 
   steps.push(
     createSnapshot({
       type: STEP_TYPES.FINISH,
+      phase: 'finish',
       selected: [...selected],
-      evaluating: null,
-      covered: Array.from(coveredIds),
-      evalCovered: [],
-      scoreboard: [],
+      covered: [...covered],
       metrics: {
-        coveredCount: coveredIds.size,
+        coveredCount: covered.length,
         total: nodes.length,
         radius,
       },
       explanation:
-        coveredIds.size === nodes.length
-          ? `Greedy Set Covering finished.\nAll nodes are covered using ${selected.length} facility(ies).`
-          : `Greedy Set Covering stopped.\nCovered ${coveredIds.size}/${nodes.length} nodes using ${selected.length} facility(ies).`,
+        `Greedy covering finished.\n` +
+        `Selected facilities: { ${selected.join(', ')} }.\n` +
+        `Covered nodes: ${covered.length}/${nodes.length}.`,
     })
   );
 

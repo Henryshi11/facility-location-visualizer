@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { MODELS, MODEL_INFO } from './config/models';
-import { ALGORITHMS, ALGORITHM_OPTIONS } from './config/algorithms';
+import {
+  ALGORITHMS,
+  getImplementedAlgorithmOptions,
+} from './config/algorithms';
 
+import { EXAMPLE_GRAPHS } from './data/exampleGraphs';
 import { generateRandomPathGraph } from './graph/generators/randomPath';
 import { buildSnapshots } from './features/simulation/buildSnapshots';
 import CanvasRenderer from './render/canvasRenderer.jsx';
@@ -10,7 +14,11 @@ import CanvasRenderer from './render/canvasRenderer.jsx';
 export default function App() {
   const [model, setModel] = useState(MODELS.PMEDIAN);
   const [algorithm, setAlgorithm] = useState(ALGORITHMS.GREEDY_ADDITION);
-  const [graph, setGraph] = useState(() => generateRandomPathGraph());
+
+  const [graph, setGraph] = useState(() => EXAMPLE_GRAPHS[0] ?? generateRandomPathGraph());
+  const [graphSource, setGraphSource] = useState(
+    EXAMPLE_GRAPHS[0]?.name ?? 'Random Path'
+  );
 
   const [p, setP] = useState(2);
   const [radius, setRadius] = useState(30);
@@ -22,17 +30,24 @@ export default function App() {
   const [playbackSpeed, setPlaybackSpeed] = useState(700);
 
   const currentAlgorithmOptions = useMemo(() => {
-    return ALGORITHM_OPTIONS[model] ?? [];
+    return getImplementedAlgorithmOptions(model);
   }, [model]);
 
   useEffect(() => {
-    const available = ALGORITHM_OPTIONS[model] ?? [];
-    const isStillValid = available.some((item) => item.id === algorithm);
+    const available = getImplementedAlgorithmOptions(model);
+    const stillValid = available.some((item) => item.id === algorithm);
 
-    if (!isStillValid && available.length > 0) {
+    if (!stillValid && available.length > 0) {
       setAlgorithm(available[0].id);
     }
   }, [model, algorithm]);
+
+  useEffect(() => {
+    const maxAllowedP = Math.max(1, graph?.nodes?.length ?? 1);
+    if (p > maxAllowedP) {
+      setP(maxAllowedP);
+    }
+  }, [graph, p]);
 
   useEffect(() => {
     const nextSnapshots = buildSnapshots({
@@ -64,19 +79,45 @@ export default function App() {
 
   const currentSnapshot = snapshots[currentStepIndex] ?? null;
 
-  const renderMetricSummary = () => {
+  function handleExampleGraphChange(name) {
+    if (name === 'Random Path') {
+      handleRandomGraph();
+      return;
+    }
+
+    const nextGraph = EXAMPLE_GRAPHS.find((item) => item.name === name);
+    if (!nextGraph) return;
+
+    setGraph(nextGraph);
+    setGraphSource(nextGraph.name);
+  }
+
+  function handleRandomGraph() {
+    const nextGraph = generateRandomPathGraph();
+    setGraph(nextGraph);
+    setGraphSource('Random Path');
+  }
+
+  function renderMetricLabel() {
+    if (model === MODELS.PMEDIAN) return 'Weighted Distance';
+    if (model === MODELS.PCENTER) return 'Max Distance';
+    if (model === MODELS.SETCOVER) return 'Coverage';
+    return 'Metric';
+  }
+
+  function renderMetricValue() {
     if (!currentSnapshot?.metrics) return '---';
 
     if (model === MODELS.PMEDIAN) {
       const value = currentSnapshot.metrics.objective;
-      return typeof value === 'number' && value !== Infinity
+      return typeof value === 'number' && Number.isFinite(value)
         ? value.toFixed(0)
         : '---';
     }
 
     if (model === MODELS.PCENTER) {
       const value = currentSnapshot.metrics.maxDistance;
-      return typeof value === 'number' && value !== Infinity
+      return typeof value === 'number' && Number.isFinite(value)
         ? value.toFixed(0)
         : '---';
     }
@@ -88,14 +129,73 @@ export default function App() {
     }
 
     return '---';
-  };
+  }
 
-  const renderMetricLabel = () => {
-    if (model === MODELS.PMEDIAN) return 'Weighted Distance';
-    if (model === MODELS.PCENTER) return 'Max Distance';
-    if (model === MODELS.SETCOVER) return 'Coverage';
-    return 'Metric';
-  };
+  function renderAlgorithmLabel() {
+    const found = currentAlgorithmOptions.find((item) => item.id === algorithm);
+    return found?.label ?? algorithm;
+  }
+
+  function renderStepProgress() {
+    if (!snapshots.length) return '0 / 0';
+    return `${currentStepIndex + 1} / ${snapshots.length}`;
+  }
+
+  function renderExtraMetric() {
+    if (!currentSnapshot?.metrics) return '---';
+
+    if (model === MODELS.PMEDIAN) {
+      if (typeof currentSnapshot.metrics.checked === 'number') {
+        return `${currentSnapshot.metrics.checked}/${currentSnapshot.metrics.totalCombos ?? '?'}`;
+      }
+      return `round ${currentSnapshot.metrics.round ?? '-'}`;
+    }
+
+    if (model === MODELS.PCENTER) {
+      if (typeof currentSnapshot.metrics.checked === 'number') {
+        return `${currentSnapshot.metrics.checked}/${currentSnapshot.metrics.totalCombos ?? '?'}`;
+      }
+      return `round ${currentSnapshot.metrics.round ?? '-'}`;
+    }
+
+    if (model === MODELS.SETCOVER) {
+      if (typeof currentSnapshot.metrics.checked === 'number') {
+        return `checked ${currentSnapshot.metrics.checked}`;
+      }
+      return `r=${currentSnapshot.metrics.radius ?? radius}`;
+    }
+
+    return '---';
+  }
+
+  function renderExtraMetricLabel() {
+    if (!currentSnapshot?.metrics) return 'Progress';
+
+    if (
+      model === MODELS.PMEDIAN &&
+      typeof currentSnapshot.metrics.checked === 'number'
+    ) {
+      return 'Enumerated';
+    }
+
+    if (
+      model === MODELS.PCENTER &&
+      typeof currentSnapshot.metrics.checked === 'number'
+    ) {
+      return 'Enumerated';
+    }
+
+    if (
+      model === MODELS.SETCOVER &&
+      typeof currentSnapshot.metrics.checked === 'number'
+    ) {
+      return 'Enumeration';
+    }
+
+    return 'Round / Param';
+  }
+
+  const topScoreboardRows = (currentSnapshot?.scoreboard ?? []).slice(0, 8);
 
   return (
     <div
@@ -109,48 +209,34 @@ export default function App() {
     >
       <div
         style={{
-          maxWidth: '1400px',
+          maxWidth: '1500px',
           margin: '0 auto',
         }}
       >
-        <h1 style={{ marginBottom: '8px', fontSize: '32px' }}>
+        <h1 style={{ marginBottom: '8px', fontSize: '34px' }}>
           Facility Location Visualizer
         </h1>
-        <p style={{ marginTop: 0, color: '#94a3b8' }}>
-          Multi-model teaching prototype with modular architecture.
+        <p style={{ marginTop: 0, color: '#94a3b8', maxWidth: '900px', lineHeight: 1.6 }}>
+          A teaching-oriented visualizer for facility location models. Explore p-Median,
+          p-Center, and Covering problems through step-by-step algorithms, example graphs,
+          and animated snapshots.
         </p>
 
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+            gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
             gap: '16px',
             marginTop: '24px',
             marginBottom: '24px',
           }}
         >
-          <div
-            style={{
-              background: '#0f172a',
-              border: '1px solid #1e293b',
-              borderRadius: '12px',
-              padding: '16px',
-            }}
-          >
-            <label style={{ display: 'block', marginBottom: '8px', color: '#94a3b8' }}>
-              Model
-            </label>
+          <div style={cardStyle}>
+            <label style={labelStyle}>Model</label>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px',
-                borderRadius: '8px',
-                background: '#020617',
-                color: '#e2e8f0',
-                border: '1px solid #334155',
-              }}
+              style={selectStyle}
             >
               <option value={MODELS.PMEDIAN}>p-Median</option>
               <option value={MODELS.PCENTER}>p-Center</option>
@@ -158,28 +244,12 @@ export default function App() {
             </select>
           </div>
 
-          <div
-            style={{
-              background: '#0f172a',
-              border: '1px solid #1e293b',
-              borderRadius: '12px',
-              padding: '16px',
-            }}
-          >
-            <label style={{ display: 'block', marginBottom: '8px', color: '#94a3b8' }}>
-              Algorithm
-            </label>
+          <div style={cardStyle}>
+            <label style={labelStyle}>Algorithm</label>
             <select
               value={algorithm}
               onChange={(e) => setAlgorithm(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px',
-                borderRadius: '8px',
-                background: '#020617',
-                color: '#e2e8f0',
-                border: '1px solid #334155',
-              }}
+              style={selectStyle}
             >
               {currentAlgorithmOptions.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -189,19 +259,26 @@ export default function App() {
             </select>
           </div>
 
-          <div
-            style={{
-              background: '#0f172a',
-              border: '1px solid #1e293b',
-              borderRadius: '12px',
-              padding: '16px',
-            }}
-          >
+          <div style={cardStyle}>
+            <label style={labelStyle}>Graph</label>
+            <select
+              value={graphSource}
+              onChange={(e) => handleExampleGraphChange(e.target.value)}
+              style={selectStyle}
+            >
+              {EXAMPLE_GRAPHS.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.name}
+                </option>
+              ))}
+              <option value="Random Path">Random Path</option>
+            </select>
+          </div>
+
+          <div style={cardStyle}>
             {model === MODELS.SETCOVER ? (
               <>
-                <label style={{ display: 'block', marginBottom: '8px', color: '#94a3b8' }}>
-                  Radius
-                </label>
+                <label style={labelStyle}>Radius</label>
                 <input
                   type="number"
                   min="1"
@@ -211,41 +288,28 @@ export default function App() {
                     const nextRadius = Math.max(1, parseInt(e.target.value, 10) || 1);
                     setRadius(nextRadius);
                   }}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    background: '#020617',
-                    color: '#e2e8f0',
-                    border: '1px solid #334155',
-                  }}
+                  style={selectStyle}
                 />
               </>
             ) : (
               <>
-                <label style={{ display: 'block', marginBottom: '8px', color: '#94a3b8' }}>
-                  p Value
-                </label>
+                <label style={labelStyle}>p Value</label>
                 <input
                   type="number"
                   min="1"
-                  max={graph.nodes.length}
+                  max={Math.max(1, graph.nodes.length)}
                   value={p}
                   onChange={(e) => {
                     const nextP = Math.max(
                       1,
-                      Math.min(graph.nodes.length, parseInt(e.target.value, 10) || 1)
+                      Math.min(
+                        Math.max(1, graph.nodes.length),
+                        parseInt(e.target.value, 10) || 1
+                      )
                     );
                     setP(nextP);
                   }}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    background: '#020617',
-                    color: '#e2e8f0',
-                    border: '1px solid #334155',
-                  }}
+                  style={selectStyle}
                 />
               </>
             )}
@@ -253,26 +317,14 @@ export default function App() {
 
           <div
             style={{
-              background: '#0f172a',
-              border: '1px solid #1e293b',
-              borderRadius: '12px',
-              padding: '16px',
+              ...cardStyle,
               display: 'flex',
               alignItems: 'end',
             }}
           >
             <button
-              onClick={() => setGraph(generateRandomPathGraph())}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: 'none',
-                background: '#2563eb',
-                color: 'white',
-                cursor: 'pointer',
-                fontWeight: 600,
-              }}
+              onClick={handleRandomGraph}
+              style={primaryButtonStyle}
             >
               Generate Random Path
             </button>
@@ -282,32 +334,67 @@ export default function App() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '2fr 1fr',
+            gridTemplateColumns: '2.2fr 1fr',
             gap: '16px',
             alignItems: 'start',
           }}
         >
-          <div
-            style={{
-              background: '#0f172a',
-              border: '1px solid #1e293b',
-              borderRadius: '12px',
-              padding: '20px',
-            }}
-          >
+          <div style={panelStyle}>
             <h2 style={{ marginTop: 0, fontSize: '20px' }}>Visualization</h2>
 
+            <div
+              style={{
+                marginBottom: '14px',
+                color: '#94a3b8',
+                lineHeight: 1.7,
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '12px',
+              }}
+            >
+              <div>
+                <div>
+                  <strong style={{ color: '#e2e8f0' }}>Graph:</strong> {graphSource}
+                </div>
+                <div>
+                  <strong style={{ color: '#e2e8f0' }}>Type:</strong> {graph.type ?? 'path'}
+                </div>
+              </div>
+              <div>
+                <div>
+                  <strong style={{ color: '#e2e8f0' }}>Algorithm:</strong> {renderAlgorithmLabel()}
+                </div>
+                <div>
+                  <strong style={{ color: '#e2e8f0' }}>Step:</strong> {renderStepProgress()}
+                </div>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <strong style={{ color: '#e2e8f0' }}>Description:</strong>{' '}
+                {graph.description ?? 'Randomly generated path graph'}
+              </div>
+            </div>
+
             <CanvasRenderer graph={graph} snapshot={currentSnapshot} />
+
+            <div
+              style={{
+                marginTop: '16px',
+                display: 'flex',
+                gap: '12px',
+                flexWrap: 'wrap',
+                color: '#cbd5e1',
+                fontSize: '14px',
+              }}
+            >
+              <LegendItem color="#2563eb" label="Selected facility" shape="square" />
+              <LegendItem color="#f59e0b" label="Evaluating node" shape="diamond" />
+              <LegendItem color="#22c55e" label="Covered node" shape="circle" />
+              <LegendItem color="#475569" label="Ordinary node" shape="circle" />
+              <LegendItem color="#facc15" label="Current best halo" shape="ring" />
+            </div>
           </div>
 
-          <div
-            style={{
-              background: '#0f172a',
-              border: '1px solid #1e293b',
-              borderRadius: '12px',
-              padding: '20px',
-            }}
-          >
+          <div style={panelStyle}>
             <h2 style={{ marginTop: 0, fontSize: '20px' }}>Simulation State</h2>
 
             <div
@@ -318,35 +405,31 @@ export default function App() {
                 marginBottom: '16px',
               }}
             >
-              <div
-                style={{
-                  background: '#020617',
-                  border: '1px solid #1e293b',
-                  borderRadius: '10px',
-                  padding: '12px',
-                }}
-              >
-                <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '6px' }}>
-                  Model
-                </div>
-                <div style={{ fontSize: '22px', fontWeight: 700 }}>
+              <div style={statCardStyle}>
+                <div style={statLabelStyle}>Model</div>
+                <div style={{ fontSize: '20px', fontWeight: 700 }}>
                   {MODEL_INFO[model]?.name}
                 </div>
               </div>
 
-              <div
-                style={{
-                  background: '#020617',
-                  border: '1px solid #1e293b',
-                  borderRadius: '10px',
-                  padding: '12px',
-                }}
-              >
-                <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '6px' }}>
-                  {renderMetricLabel()}
+              <div style={statCardStyle}>
+                <div style={statLabelStyle}>{renderMetricLabel()}</div>
+                <div style={{ fontSize: '20px', fontWeight: 700 }}>
+                  {renderMetricValue()}
                 </div>
-                <div style={{ fontSize: '22px', fontWeight: 700 }}>
-                  {renderMetricSummary()}
+              </div>
+
+              <div style={statCardStyle}>
+                <div style={statLabelStyle}>{renderExtraMetricLabel()}</div>
+                <div style={{ fontSize: '18px', fontWeight: 700 }}>
+                  {renderExtraMetric()}
+                </div>
+              </div>
+
+              <div style={statCardStyle}>
+                <div style={statLabelStyle}>Snapshots</div>
+                <div style={{ fontSize: '18px', fontWeight: 700 }}>
+                  {snapshots.length}
                 </div>
               </div>
             </div>
@@ -357,12 +440,12 @@ export default function App() {
                 {MODEL_INFO[model]?.description}
               </div>
               <div>
-                <strong style={{ color: '#e2e8f0' }}>Snapshots:</strong>{' '}
-                {snapshots.length}
+                <strong style={{ color: '#e2e8f0' }}>Step Type:</strong>{' '}
+                {currentSnapshot?.type ?? '---'}
               </div>
               <div>
-                <strong style={{ color: '#e2e8f0' }}>Current Step:</strong>{' '}
-                {currentStepIndex}
+                <strong style={{ color: '#e2e8f0' }}>Phase:</strong>{' '}
+                {currentSnapshot?.phase ?? '---'}
               </div>
             </div>
 
@@ -454,22 +537,62 @@ export default function App() {
               />
             </div>
 
-            <div
-              style={{
-                background: '#020617',
-                border: '1px solid #1e293b',
-                borderRadius: '8px',
-                padding: '12px',
-                marginBottom: '16px',
-              }}
-            >
-              <div style={{ marginBottom: '8px' }}>
-                <strong style={{ color: '#93c5fd' }}>Step Type:</strong>{' '}
-                {currentSnapshot?.type ?? '---'}
+            <div style={explanationPanelStyle}>
+              <div style={{ marginBottom: '8px', color: '#93c5fd', fontWeight: 700 }}>
+                Explanation
               </div>
-              <div style={{ whiteSpace: 'pre-wrap', color: '#cbd5e1', lineHeight: 1.6 }}>
+              <div style={{ whiteSpace: 'pre-wrap', color: '#cbd5e1', lineHeight: 1.65 }}>
                 {currentSnapshot?.explanation ?? 'No snapshot yet.'}
               </div>
+            </div>
+
+            <div style={scoreboardPanelStyle}>
+              <div style={{ marginBottom: '8px', color: '#93c5fd', fontWeight: 700 }}>
+                Top Scoreboard
+              </div>
+
+              {topScoreboardRows.length === 0 ? (
+                <div style={{ color: '#64748b' }}>No scoreboard data on this step.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  {topScoreboardRows.map((row) => (
+                    <div
+                      key={row.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr auto',
+                        gap: '10px',
+                        alignItems: 'center',
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        background: row.isBest ? 'rgba(250, 204, 21, 0.12)' : '#020617',
+                        border: row.isBest
+                          ? '1px solid rgba(250, 204, 21, 0.35)'
+                          : '1px solid #1e293b',
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: row.isBest ? '#fde68a' : '#cbd5e1',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {row.id}
+                      </div>
+                      <div
+                        style={{
+                          color: row.isBest ? '#fde68a' : '#93c5fd',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {Number.isFinite(row.score) ? row.score.toFixed(0) : '∞'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>
@@ -480,10 +603,11 @@ export default function App() {
                   padding: '12px',
                   borderRadius: '8px',
                   overflowX: 'auto',
-                  maxHeight: '240px',
+                  maxHeight: '220px',
                   overflowY: 'auto',
                   color: '#cbd5e1',
                   marginTop: '8px',
+                  border: '1px solid #1e293b',
                 }}
               >
                 {JSON.stringify(currentSnapshot, null, 2)}
@@ -496,6 +620,111 @@ export default function App() {
   );
 }
 
+function LegendItem({ color, label, shape }) {
+  let shapeStyle;
+
+  if (shape === 'square') {
+    shapeStyle = {
+      width: 14,
+      height: 14,
+      background: color,
+      borderRadius: 2,
+      border: '1px solid rgba(255,255,255,0.25)',
+    };
+  } else if (shape === 'diamond') {
+    shapeStyle = {
+      width: 14,
+      height: 14,
+      background: color,
+      transform: 'rotate(45deg)',
+      borderRadius: 2,
+      border: '1px solid rgba(255,255,255,0.25)',
+    };
+  } else if (shape === 'ring') {
+    shapeStyle = {
+      width: 14,
+      height: 14,
+      borderRadius: '50%',
+      border: `3px solid ${color}`,
+      background: 'transparent',
+      boxSizing: 'border-box',
+    };
+  } else {
+    shapeStyle = {
+      width: 14,
+      height: 14,
+      background: color,
+      borderRadius: '50%',
+      border: '1px solid rgba(255,255,255,0.25)',
+    };
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={shapeStyle} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+const cardStyle = {
+  background: '#0f172a',
+  border: '1px solid #1e293b',
+  borderRadius: '12px',
+  padding: '16px',
+};
+
+const panelStyle = {
+  background: '#0f172a',
+  border: '1px solid #1e293b',
+  borderRadius: '12px',
+  padding: '20px',
+};
+
+const explanationPanelStyle = {
+  background: '#020617',
+  border: '1px solid #1e293b',
+  borderRadius: '8px',
+  padding: '12px',
+  marginBottom: '16px',
+};
+
+const scoreboardPanelStyle = {
+  background: '#0b1220',
+  border: '1px solid #1e293b',
+  borderRadius: '8px',
+  padding: '12px',
+  marginBottom: '16px',
+};
+
+const labelStyle = {
+  display: 'block',
+  marginBottom: '8px',
+  color: '#94a3b8',
+};
+
+const selectStyle = {
+  width: '100%',
+  padding: '10px',
+  borderRadius: '8px',
+  background: '#020617',
+  color: '#e2e8f0',
+  border: '1px solid #334155',
+};
+
+const statCardStyle = {
+  background: '#020617',
+  border: '1px solid #1e293b',
+  borderRadius: '10px',
+  padding: '12px',
+};
+
+const statLabelStyle = {
+  color: '#94a3b8',
+  fontSize: '12px',
+  marginBottom: '6px',
+};
+
 const buttonStyle = {
   padding: '8px 12px',
   borderRadius: '8px',
@@ -503,4 +732,15 @@ const buttonStyle = {
   background: '#020617',
   color: '#e2e8f0',
   cursor: 'pointer',
+};
+
+const primaryButtonStyle = {
+  width: '100%',
+  padding: '10px 14px',
+  borderRadius: '8px',
+  border: 'none',
+  background: '#2563eb',
+  color: 'white',
+  cursor: 'pointer',
+  fontWeight: 600,
 };
