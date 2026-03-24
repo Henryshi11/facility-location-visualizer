@@ -1,28 +1,51 @@
 export function applyPathLayout(nodes, edges) {
-  const marginX = 80;
-  const usableWidth = 1120;
-  const y = 280;
+  const totalNodes = nodes.length;
 
-  const totalLength = edges.reduce((sum, edge) => sum + (edge.length ?? 1), 0);
+  if (totalNodes === 0) {
+    return {
+      nodes: [],
+      edges,
+    };
+  }
 
-  let currentX = marginX;
+  const nodesPerRow = 4;
+  const leftX = 110;
+  const rightX = 1130;
+  const rowGap = 150;
+  const topY = 120;
+
+  const rowCount = Math.ceil(totalNodes / nodesPerRow);
 
   const laidOutNodes = nodes.map((node, index) => {
-    const laidOutNode = {
-      ...node,
-      x: currentX,
-      y,
-    };
+    const rowIndex = Math.floor(index / nodesPerRow);
+    const indexInRow = index % nodesPerRow;
 
-    const nextEdge = edges[index];
-    if (nextEdge) {
-      const edgeLength = nextEdge.length ?? 1;
-      const spacing =
-        totalLength > 0 ? (edgeLength / totalLength) * usableWidth : usableWidth / Math.max(1, edges.length);
-      currentX += spacing;
+    const rowStart = rowIndex * nodesPerRow;
+    const rowEnd = Math.min(rowStart + nodesPerRow, totalNodes);
+    const rowNodeCount = rowEnd - rowStart;
+
+    const usableWidth = rightX - leftX;
+    const horizontalGap =
+      rowNodeCount <= 1 ? 0 : usableWidth / (rowNodeCount - 1);
+
+    const isLeftToRight = rowIndex % 2 === 0;
+
+    let x;
+    if (rowNodeCount === 1) {
+      x = (leftX + rightX) / 2;
+    } else if (isLeftToRight) {
+      x = leftX + indexInRow * horizontalGap;
+    } else {
+      x = rightX - indexInRow * horizontalGap;
     }
 
-    return laidOutNode;
+    const y = topY + rowIndex * rowGap;
+
+    return {
+      ...node,
+      x,
+      y,
+    };
   });
 
   return {
