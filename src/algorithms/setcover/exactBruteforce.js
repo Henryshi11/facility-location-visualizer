@@ -1,10 +1,10 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
 import {
-  computeCoveredDemandWeight,
-  computeCoveredNodes,
-  computeLambdaServiceCost,
+  computeCostCoveredNodes,
+  computeMaxAssignmentCost,
   getAssignments,
+  isCostCoverFeasible,
 } from '../shared/assignments';
 
 function combinationsUpTo(array, maxSize) {
@@ -40,22 +40,20 @@ function buildScoreboard(entries, bestKey) {
     .sort((a, b) => {
       if (a.feasible !== b.feasible) return a.feasible ? -1 : 1;
       if (a.feasible && b.feasible && a.size !== b.size) return a.size - b.size;
-      if (a.feasible && b.feasible && a.serviceCost !== b.serviceCost) {
-        return a.serviceCost - b.serviceCost;
-      }
-      if (b.coveredWeight !== a.coveredWeight) return b.coveredWeight - a.coveredWeight;
+      if (a.feasible && b.feasible && a.maxCost !== b.maxCost) return a.maxCost - b.maxCost;
       return a.id.localeCompare(b.id);
     })
     .map((item) => ({
       id: item.id,
-      score: item.feasible ? item.serviceCost : item.coveredWeight,
+      score: item.feasible ? item.size : item.coveredCount,
       isBest: item.id === bestKey,
     }));
 }
 
 export function generateSetCoverExactBruteforceSteps(graph, params = {}) {
   const { nodes, distMatrix } = graph;
-  const lambdaValue = Math.max(1, params.lambdaValue ?? params.radius ?? 30);
+  const lambdaValue = Math.max(0, params.lambdaValue ?? 30);
+
   const nodeIds = nodes.map((node) => node.id);
   const combos = combinationsUpTo(nodeIds, nodeIds.length);
 
@@ -65,7 +63,7 @@ export function generateSetCoverExactBruteforceSteps(graph, params = {}) {
   let bestCombo = null;
   let bestCovered = [];
   let bestAssignments = {};
-  let bestServiceCost = Infinity;
+  let bestMaxCost = Infinity;
 
   steps.push(
     createSnapshot({
@@ -73,39 +71,38 @@ export function generateSetCoverExactBruteforceSteps(graph, params = {}) {
       phase: 'init',
       selected: [],
       covered: [],
+      assignments: {},
       scoreboard: [],
       metrics: {
+        lambdaValue,
+        facilityCount: 0,
         coveredCount: 0,
-        coveredDemandWeight: 0,
         total: nodes.length,
-        lambda: lambdaValue,
         checked: 0,
+        maxCost: Infinity,
       },
       explanation:
-        `Initializing exact brute-force λ-covering.\n` +
-        `Primary goal: find a minimum-cardinality full cover under λ = ${lambdaValue}.\n` +
-        `Tie-break goal: among covers with the same number of facilities, minimize total weighted service cost Σ w_i d(i,S).\n` +
-        `This avoids the degenerate pure-cost solution where selecting every node gives cost 0.`,
+        `Initializing exact brute-force cost covering.\n` +
+        `Goal: find the minimum number of facilities such that every node satisfies w_i d(i,S) ≤ λ.\n` +
+        `Here λ = ${lambdaValue}.\n` +
+        `This method checks every subset, so it is only suitable for small graphs.`,
     })
   );
 
   for (let index = 0; index < combos.length; index++) {
     const combo = combos[index];
-    const covered = computeCoveredNodes(nodes, combo, distMatrix, lambdaValue);
     const assignments = getAssignments(nodes, combo, distMatrix);
-    const coveredWeight = computeCoveredDemandWeight(nodes, covered);
-    const isFullCover = covered.length === nodes.length;
-    const serviceCost = isFullCover
-      ? computeLambdaServiceCost(nodes, assignments, lambdaValue)
-      : Infinity;
+    const covered = computeCostCoveredNodes(nodes, assignments, lambdaValue);
+    const feasible = isCostCoverFeasible(nodes, assignments, lambdaValue);
+    const maxCost = computeMaxAssignmentCost(nodes, assignments);
     const label = comboLabel(combo);
 
     scoreboardEntries.push({
       id: label,
-      coveredWeight,
       size: combo.length,
-      feasible: isFullCover,
-      serviceCost,
+      coveredCount: covered.length,
+      feasible,
+      maxCost,
     });
 
     steps.push(
@@ -120,58 +117,58 @@ export function generateSetCoverExactBruteforceSteps(graph, params = {}) {
           bestCombo ? comboLabel(bestCombo) : null
         ),
         metrics: {
-          coveredCount: covered.length,
-          coveredDemandWeight: coveredWeight,
-          total: nodes.length,
-          lambda: lambdaValue,
-          checked: index + 1,
+          lambdaValue,
           facilityCount: combo.length,
-          serviceCost,
+          coveredCount: covered.length,
+          total: nodes.length,
+          checked: index + 1,
+          maxCost,
+          feasible,
         },
         explanation:
           `Evaluate facility set { ${label} }.\n` +
-          `Covered nodes: ${covered.length}/${nodes.length}.\n` +
-          `Covered demand weight: ${coveredWeight}.\n` +
-          `Feasible full cover: ${isFullCover ? 'yes' : 'no'}.`,
+          `Covered nodes under cost threshold: ${covered.length}/${nodes.length}.\n` +
+          `Worst weighted cost: ${Number.isFinite(maxCost) ? maxCost.toFixed(0) : '∞'}.\n` +
+          `Feasible: ${feasible ? 'yes' : 'no'}.`,
       })
     );
 
     const better =
-      isFullCover &&
+      feasible &&
       (!bestCombo ||
         combo.length < bestCombo.length ||
         (combo.length === bestCombo.length &&
-          (serviceCost < bestServiceCost ||
-            (serviceCost === bestServiceCost &&
+          (maxCost < bestMaxCost ||
+            (maxCost === bestMaxCost &&
               label.localeCompare(comboLabel(bestCombo)) < 0))));
 
     if (better) {
       bestCombo = [...combo];
       bestCovered = [...covered];
       bestAssignments = assignments;
-      bestServiceCost = serviceCost;
+      bestMaxCost = maxCost;
 
       steps.push(
         createSnapshot({
           type: STEP_TYPES.UPDATE_BEST,
           phase: 'update_best',
           selected: [...bestCombo],
-          covered: [...bestCovered],
+          covered: bestCovered,
           assignments: bestAssignments,
           scoreboard: buildScoreboard(scoreboardEntries, comboLabel(bestCombo)),
           metrics: {
-            coveredCount: bestCovered.length,
-            coveredDemandWeight: computeCoveredDemandWeight(nodes, bestCovered),
-            total: nodes.length,
-            lambda: lambdaValue,
-            checked: index + 1,
+            lambdaValue,
             facilityCount: bestCombo.length,
-            serviceCost: bestServiceCost,
+            coveredCount: bestCovered.length,
+            total: nodes.length,
+            checked: index + 1,
+            maxCost: bestMaxCost,
+            feasible: true,
           },
           explanation:
-            `New best full cover found: { ${comboLabel(bestCombo)} }.\n` +
-            `Primary criterion: smaller facility count.\n` +
-            `Tie-break criterion: smaller total weighted service cost.`,
+            `New best feasible solution found: { ${comboLabel(bestCombo)} }.\n` +
+            `Primary objective: minimize facility count.\n` +
+            `Tie-break: minimize worst weighted cost.`,
         })
       );
     }
@@ -189,18 +186,18 @@ export function generateSetCoverExactBruteforceSteps(graph, params = {}) {
         bestCombo ? comboLabel(bestCombo) : null
       ),
       metrics: {
-        coveredCount: bestCovered.length,
-        coveredDemandWeight: computeCoveredDemandWeight(nodes, bestCovered),
-        total: nodes.length,
-        lambda: lambdaValue,
+        lambdaValue,
         facilityCount: bestCombo ? bestCombo.length : 0,
-        serviceCost: bestServiceCost,
+        coveredCount: bestCovered.length,
+        total: nodes.length,
         checked: combos.length,
+        maxCost: bestMaxCost,
+        feasible: Boolean(bestCombo),
       },
       explanation:
         bestCombo
-          ? `Exact brute-force λ-covering finished.\nFinal facilities: { ${comboLabel(bestCombo)} }.\nMinimum facility count: ${bestCombo.length}.\nTie-break weighted service cost: ${bestServiceCost.toFixed(0)}.`
-          : `Exact brute-force λ-covering finished, but no full cover was found.`,
+          ? `Exact brute-force cost covering finished.\nFinal facilities: { ${comboLabel(bestCombo)} }.\nMinimum facility count: ${bestCombo.length}.\nWorst weighted cost: ${bestMaxCost.toFixed(0)}.`
+          : `Exact brute-force cost covering finished, but no feasible solution was found.`,
     })
   );
 

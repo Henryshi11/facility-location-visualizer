@@ -40,7 +40,7 @@ export function generatePCenterGreedySteps(graph, params = {}) {
       },
       explanation:
         `Initializing greedy p-Center.\n` +
-        `Goal: choose ${p} facilities to minimize the worst assignment cost.\n` +
+        `Goal: choose ${p} facilities to minimize the worst weighted assignment cost.\n` +
         `Here cost means weight × distance, so the objective is max_i w_i d(i,S).\n` +
         `Greedy rule: at each round, add the facility that gives the best immediate maximum cost.`,
     })

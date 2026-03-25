@@ -5,45 +5,21 @@ import {
   getAssignments,
 } from '../shared/assignments';
 
-function getCostScoreboard(nodes, assignments, bestId) {
-  return nodes
-    .map((node) => ({
-      id: node.id,
-      score: assignments[node.id]?.cost ?? Infinity,
-      isBest: node.id === bestId,
-    }))
+function buildScoreboard(candidates, bestId) {
+  return candidates
+    .slice()
     .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
+      if (a.score !== b.score) return a.score - b.score;
       return String(a.id).localeCompare(String(b.id));
-    });
+    })
+    .map((item) => ({
+      id: item.id,
+      score: item.score,
+      isBest: item.id === bestId,
+    }));
 }
 
-function chooseFarthestNode(nodes, assignments, selected) {
-  let farthest = null;
-
-  for (const node of nodes) {
-    if (selected.includes(node.id)) continue;
-
-    const cost = assignments[node.id]?.cost ?? Infinity;
-
-    if (!farthest) {
-      farthest = { id: node.id, cost };
-      continue;
-    }
-
-    if (cost > farthest.cost) {
-      farthest = { id: node.id, cost };
-    } else if (cost === farthest.cost) {
-      if (String(node.id).localeCompare(String(farthest.id)) < 0) {
-        farthest = { id: node.id, cost };
-      }
-    }
-  }
-
-  return farthest;
-}
-
-export function generatePCenterFarthestFirstSteps(graph, params = {}) {
+export function generatePCenterGreedySteps(graph, params = {}) {
   const { nodes, distMatrix } = graph;
   const p = Math.max(1, Math.min(params.p ?? 2, nodes.length));
 
@@ -56,153 +32,160 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
       phase: 'init',
       selected: [],
       assignments: {},
+      scoreboard: [],
       metrics: {
         maxCost: Infinity,
         round: 0,
         p,
       },
       explanation:
-        `Initializing farthest-first p-Center.\n` +
-        `Goal: choose ${p} facilities to reduce the worst weighted cost max_i w_i d(i,S).\n` +
-        `Heuristic rule: start with one facility, then repeatedly add the node with largest current weighted cost.`,
+        `Initializing greedy p-Center.\n` +
+        `Goal: choose ${p} facilities to minimize the worst weighted assignment cost.\n` +
+        `Here cost means weight × distance, so the objective is max_i w_i d(i,S).\n` +
+        `Greedy rule: at each round, add the facility that gives the best immediate maximum cost.`,
     })
   );
 
-  const firstFacility = nodes[0]?.id ?? null;
-  if (firstFacility === null) {
-    return steps.map((step, index) => ({ ...step, stepIndex: index }));
-  }
+  for (let round = 1; round <= p; round++) {
+    const candidates = [];
 
-  selected.push(firstFacility);
-
-  let assignments = getAssignments(nodes, selected, distMatrix);
-  let maxCost = computeMaxAssignmentCost(nodes, assignments);
-
-  steps.push(
-    createSnapshot({
-      type: STEP_TYPES.SELECT,
-      phase: 'seed',
-      selected: [...selected],
-      currentBest: firstFacility,
-      assignments,
-      metrics: {
-        maxCost,
-        round: 1,
-        p,
-      },
-      explanation:
-        `Seed the process with node ${firstFacility} as the first facility.\n` +
-        `Now measure each node's weighted assignment cost w_i d(i,S).`,
-    })
-  );
-
-  for (let round = 2; round <= p; round++) {
-    assignments = getAssignments(nodes, selected, distMatrix);
-    maxCost = computeMaxAssignmentCost(nodes, assignments);
+    const currentAssignments = getAssignments(nodes, selected, distMatrix);
+    const currentMaxCost =
+      selected.length > 0
+        ? computeMaxAssignmentCost(nodes, currentAssignments)
+        : Infinity;
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.ROUND_START,
         phase: 'round_start',
         selected: [...selected],
-        assignments,
-        scoreboard: getCostScoreboard(nodes, assignments, null),
+        assignments: currentAssignments,
+        scoreboard: [],
         metrics: {
-          maxCost,
+          maxCost: currentMaxCost,
           round,
           p,
         },
         explanation:
           `--- Round ${round} of ${p} ---\n` +
-          `Compute each node's weighted cost to the nearest selected facility.\n` +
-          `The next facility is chosen from the largest-cost demand point.`,
+          `Try every unselected node as the next facility and compare the resulting worst weighted cost.`,
       })
     );
 
-    const farthest = chooseFarthestNode(nodes, assignments, selected);
+    for (const node of nodes) {
+      if (selected.includes(node.id)) continue;
 
-    if (!farthest) {
+      const trialFacilities = [...selected, node.id];
+      const assignments = getAssignments(nodes, trialFacilities, distMatrix);
+      const maxCost = computeMaxAssignmentCost(nodes, assignments);
+
+      candidates.push({
+        id: node.id,
+        score: maxCost,
+        assignments,
+      });
+
+      const currentBest =
+        candidates.reduce((best, item) => {
+          if (!best) return item;
+          if (item.score < best.score) return item;
+          if (item.score === best.score) {
+            return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+          }
+          return best;
+        }, null)?.id ?? null;
+
       steps.push(
         createSnapshot({
-          type: STEP_TYPES.NO_PROGRESS,
-          phase: 'no_progress',
+          type: STEP_TYPES.EVALUATE,
+          phase: 'evaluate_candidate',
           selected: [...selected],
+          evaluating: node.id,
+          currentBest,
           assignments,
+          scoreboard: buildScoreboard(candidates, currentBest),
           metrics: {
             maxCost,
             round,
             p,
           },
-          explanation: `No unselected node remained. The algorithm stops early.`,
+          explanation:
+            `Evaluate candidate ${node.id}.\n` +
+            `If selected next, the maximum weighted assignment cost becomes ${maxCost.toFixed(0)}.`,
+        })
+      );
+    }
+
+    const bestCandidate = candidates.reduce((best, item) => {
+      if (!best) return item;
+      if (item.score < best.score) return item;
+      if (item.score === best.score) {
+        return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+      }
+      return best;
+    }, null);
+
+    if (!bestCandidate) {
+      steps.push(
+        createSnapshot({
+          type: STEP_TYPES.NO_PROGRESS,
+          phase: 'no_progress',
+          selected: [...selected],
+          assignments: currentAssignments,
+          scoreboard: [],
+          metrics: {
+            maxCost: currentMaxCost,
+            round,
+            p,
+          },
+          explanation: `No valid candidate remained. The algorithm stops early.`,
         })
       );
       break;
     }
 
-    steps.push(
-      createSnapshot({
-        type: STEP_TYPES.EVALUATE,
-        phase: 'find_farthest',
-        selected: [...selected],
-        evaluating: farthest.id,
-        currentBest: farthest.id,
-        assignments,
-        scoreboard: getCostScoreboard(nodes, assignments, farthest.id),
-        metrics: {
-          maxCost,
-          round,
-          p,
-        },
-        explanation:
-          `The current worst-cost node is ${farthest.id}.\n` +
-          `Its weighted assignment cost is ${Number.isFinite(farthest.cost) ? farthest.cost.toFixed(0) : '∞'}.\n` +
-          `Farthest-first chooses this node as the next facility.`,
-      })
-    );
-
-    selected.push(farthest.id);
-    assignments = getAssignments(nodes, selected, distMatrix);
-    maxCost = computeMaxAssignmentCost(nodes, assignments);
+    selected.push(bestCandidate.id);
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.SELECT,
-        phase: 'select_farthest',
+        phase: 'select_candidate',
         selected: [...selected],
-        currentBest: farthest.id,
-        assignments,
-        scoreboard: getCostScoreboard(nodes, assignments, null),
+        currentBest: bestCandidate.id,
+        assignments: bestCandidate.assignments,
+        scoreboard: buildScoreboard(candidates, bestCandidate.id),
         metrics: {
-          maxCost,
+          maxCost: bestCandidate.score,
           round,
           p,
         },
         explanation:
-          `Select node ${farthest.id} as the next facility.\n` +
+          `Select node ${bestCandidate.id} as the next facility.\n` +
           `Current facility set: { ${selected.join(', ')} }.\n` +
-          `New maximum weighted assignment cost: ${maxCost.toFixed(0)}.`,
+          `Current maximum weighted assignment cost: ${bestCandidate.score.toFixed(0)}.`,
       })
     );
   }
 
-  assignments = getAssignments(nodes, selected, distMatrix);
-  maxCost = computeMaxAssignmentCost(nodes, assignments);
+  const finalAssignments = getAssignments(nodes, selected, distMatrix);
+  const finalMaxCost = computeMaxAssignmentCost(nodes, finalAssignments);
 
   steps.push(
     createSnapshot({
       type: STEP_TYPES.FINISH,
       phase: 'finish',
       selected: [...selected],
-      assignments,
+      assignments: finalAssignments,
       metrics: {
-        maxCost,
+        maxCost: finalMaxCost,
         round: selected.length,
         p,
       },
       explanation:
-        `Farthest-first p-Center finished.\n` +
+        `Greedy p-Center finished.\n` +
         `Final facilities: { ${selected.join(', ')} }.\n` +
-        `Final maximum weighted assignment cost: ${maxCost.toFixed(0)}.`,
+        `Final maximum weighted assignment cost: ${finalMaxCost.toFixed(0)}.`,
     })
   );
 

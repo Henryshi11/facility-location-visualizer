@@ -34,36 +34,15 @@ export function getAssignments(nodes, selectedFacilities, distMatrix) {
   return assignments;
 }
 
-export function computeNodeAssignmentCost(node, assignments) {
-  const distance = assignments[node.id]?.distance ?? Infinity;
-  return (node.weight ?? 1) * distance;
-}
-
-export function computeTotalAssignmentCost(nodes, assignments) {
+export function computeWeightedObjective(nodes, assignments) {
   let total = 0;
 
   for (const node of nodes) {
-    total += computeNodeAssignmentCost(node, assignments);
+    const distance = assignments[node.id]?.distance ?? Infinity;
+    total += (node.weight ?? 1) * distance;
   }
 
   return total;
-}
-
-export function computeWeightedObjective(nodes, assignments) {
-  return computeTotalAssignmentCost(nodes, assignments);
-}
-
-export function computeMaxAssignmentCost(nodes, assignments) {
-  let maxCost = 0;
-
-  for (const node of nodes) {
-    const cost = computeNodeAssignmentCost(node, assignments);
-    if (cost > maxCost) {
-      maxCost = cost;
-    }
-  }
-
-  return maxCost;
 }
 
 export function computeMaxAssignmentDistance(nodes, assignments) {
@@ -79,21 +58,25 @@ export function computeMaxAssignmentDistance(nodes, assignments) {
   return maxDistance;
 }
 
-export function computeCoveredNodes(nodes, selectedFacilities, distMatrix, lambdaValue) {
+export function computeMaxAssignmentCost(nodes, assignments) {
+  let maxCost = 0;
+
+  for (const node of nodes) {
+    const cost = assignments[node.id]?.cost ?? Infinity;
+    if (cost > maxCost) {
+      maxCost = cost;
+    }
+  }
+
+  return maxCost;
+}
+
+export function computeCostCoveredNodes(nodes, assignments, lambdaValue) {
   const covered = [];
 
   for (const node of nodes) {
-    let isCovered = false;
-
-    for (const facilityId of selectedFacilities) {
-      const d = getDistance(distMatrix, node.id, facilityId);
-      if (d <= lambdaValue) {
-        isCovered = true;
-        break;
-      }
-    }
-
-    if (isCovered) {
+    const cost = assignments[node.id]?.cost ?? Infinity;
+    if (cost <= lambdaValue) {
       covered.push(node.id);
     }
   }
@@ -101,29 +84,12 @@ export function computeCoveredNodes(nodes, selectedFacilities, distMatrix, lambd
   return covered;
 }
 
-export function computeCoveredDemandWeight(nodes, coveredNodeIds) {
-  const coveredSet = new Set(coveredNodeIds);
-  let total = 0;
-
+export function isCostCoverFeasible(nodes, assignments, lambdaValue) {
   for (const node of nodes) {
-    if (coveredSet.has(node.id)) {
-      total += node.weight ?? 1;
+    const cost = assignments[node.id]?.cost ?? Infinity;
+    if (cost > lambdaValue) {
+      return false;
     }
   }
-
-  return total;
-}
-
-export function computeLambdaServiceCost(nodes, assignments, lambdaValue) {
-  let total = 0;
-
-  for (const node of nodes) {
-    const distance = assignments[node.id]?.distance ?? Infinity;
-    if (distance > lambdaValue) {
-      return Infinity;
-    }
-    total += (node.weight ?? 1) * distance;
-  }
-
-  return total;
+  return true;
 }

@@ -32,8 +32,8 @@ function getRoundLabel(snapshot, model) {
   if (!snapshot) return '-';
 
   if (model === MODELS.SETCOVER) {
-    if (snapshot.metrics?.lambda != null) {
-      return `λ = ${snapshot.metrics.lambda}`;
+    if (snapshot.metrics?.lambdaValue != null) {
+      return `λ = ${snapshot.metrics.lambdaValue}`;
     }
     return snapshot.metrics?.round ?? '-';
   }
@@ -58,8 +58,8 @@ function getPrimaryMetric(snapshot, model) {
 
   if (model === MODELS.PMEDIAN) {
     return {
-      label: 'Total Cost',
-      value: snapshot.metrics?.totalCost,
+      label: 'Objective',
+      value: snapshot.metrics?.objective,
     };
   }
 
@@ -72,8 +72,8 @@ function getPrimaryMetric(snapshot, model) {
 
   if (model === MODELS.SETCOVER) {
     return {
-      label: 'Service Cost',
-      value: snapshot.metrics?.serviceCost,
+      label: 'Max Cost',
+      value: snapshot.metrics?.maxCost,
     };
   }
 
@@ -212,7 +212,7 @@ export default function App() {
             >
               <option value={MODELS.PMEDIAN}>p-Median</option>
               <option value={MODELS.PCENTER}>p-Center</option>
-              <option value={MODELS.SETCOVER}>λ-Covering</option>
+              <option value={MODELS.SETCOVER}>Cost Covering</option>
             </select>
           </div>
 
@@ -245,10 +245,10 @@ export default function App() {
 
           {model === MODELS.SETCOVER ? (
             <div style={panelStyle}>
-              <div style={labelStyle}>λ (Coverage Threshold)</div>
+              <div style={labelStyle}>λ (Cost Threshold)</div>
               <input
                 type="number"
-                min="1"
+                min="0"
                 value={lambdaValue}
                 onChange={(event) => setLambdaValue(Number(event.target.value))}
                 style={inputStyle}
@@ -325,7 +325,7 @@ export default function App() {
             </span>
             <span style={legendItemStyle}>
               <span style={{ ...legendDotStyle, background: '#22c55e' }} />
-              Covered node
+              Feasible node
             </span>
             <span style={legendItemStyle}>
               <span
@@ -391,17 +391,16 @@ export default function App() {
 
             {currentSnapshot?.metrics?.coveredCount != null && (
               <div style={metaLineStyle}>
-                <strong>Covered:</strong>{' '}
+                <strong>Feasible Nodes:</strong>{' '}
                 <span>
                   {currentSnapshot.metrics.coveredCount}/{currentSnapshot.metrics.total ?? 0}
                 </span>
               </div>
             )}
 
-            {currentSnapshot?.metrics?.coveredDemandWeight != null && (
+            {currentSnapshot?.metrics?.lambdaValue != null && (
               <div style={metaLineStyle}>
-                <strong>Covered Demand Weight:</strong>{' '}
-                <span>{currentSnapshot.metrics.coveredDemandWeight}</span>
+                <strong>λ Threshold:</strong> <span>{currentSnapshot.metrics.lambdaValue}</span>
               </div>
             )}
 
