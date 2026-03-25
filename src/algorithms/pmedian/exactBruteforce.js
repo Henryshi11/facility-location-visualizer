@@ -1,7 +1,7 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
 import {
-  computeWeightedObjective,
+  computeTotalAssignmentCost,
   getAssignments,
 } from '../shared/assignments';
 
@@ -54,7 +54,7 @@ export function generatePMedianExactBruteforceSteps(graph, params = {}) {
 
   let bestCombo = null;
   let bestAssignments = {};
-  let bestObjective = Infinity;
+  let bestCost = Infinity;
 
   steps.push(
     createSnapshot({
@@ -64,26 +64,26 @@ export function generatePMedianExactBruteforceSteps(graph, params = {}) {
       assignments: {},
       scoreboard: [],
       metrics: {
-        objective: Infinity,
+        totalCost: Infinity,
         checked: 0,
         totalCombos: combos.length,
         p,
       },
       explanation:
         `Initializing exact brute-force p-Median.\n` +
-        `Goal: choose ${p} facilities to minimize weighted total distance.\n` +
+        `Goal: choose ${p} facilities to minimize total assignment cost Σ w_i d(i,S).\n` +
         `This method checks every possible size-${p} facility set, so it is only suitable for small graphs.`,
     })
   );
 
   combos.forEach((combo, index) => {
     const assignments = getAssignments(nodes, combo, distMatrix);
-    const objective = computeWeightedObjective(nodes, assignments);
+    const totalCost = computeTotalAssignmentCost(nodes, assignments);
     const label = comboLabel(combo);
 
     scoreboardEntries.push({
       id: label,
-      score: objective,
+      score: totalCost,
     });
 
     steps.push(
@@ -98,20 +98,20 @@ export function generatePMedianExactBruteforceSteps(graph, params = {}) {
           bestCombo ? comboLabel(bestCombo) : null
         ),
         metrics: {
-          objective,
+          totalCost,
           checked: index + 1,
           totalCombos: combos.length,
           p,
         },
         explanation:
           `Evaluating facility set { ${label} }.\n` +
-          `Weighted total distance = ${objective.toFixed(0)}.\n` +
+          `Total assignment cost = ${totalCost.toFixed(0)}.\n` +
           `Checked ${index + 1} of ${combos.length} candidate sets.`,
       })
     );
 
-    if (objective < bestObjective) {
-      bestObjective = objective;
+    if (totalCost < bestCost) {
+      bestCost = totalCost;
       bestCombo = [...combo];
       bestAssignments = assignments;
 
@@ -124,14 +124,14 @@ export function generatePMedianExactBruteforceSteps(graph, params = {}) {
           assignments: bestAssignments,
           scoreboard: buildScoreboard(scoreboardEntries, comboLabel(bestCombo)),
           metrics: {
-            objective: bestObjective,
+            totalCost: bestCost,
             checked: index + 1,
             totalCombos: combos.length,
             p,
           },
           explanation:
             `New best solution found: { ${comboLabel(bestCombo)} }.\n` +
-            `Best weighted total distance is now ${bestObjective.toFixed(0)}.`,
+            `Best total assignment cost is now ${bestCost.toFixed(0)}.`,
         })
       );
     }
@@ -148,14 +148,14 @@ export function generatePMedianExactBruteforceSteps(graph, params = {}) {
         bestCombo ? comboLabel(bestCombo) : null
       ),
       metrics: {
-        objective: bestObjective,
+        totalCost: bestCost,
         checked: combos.length,
         totalCombos: combos.length,
         p,
       },
       explanation:
         bestCombo
-          ? `Exact brute-force p-Median finished.\nFinal optimal facilities: { ${comboLabel(bestCombo)} }.\nOptimal weighted total distance: ${bestObjective.toFixed(0)}.`
+          ? `Exact brute-force p-Median finished.\nFinal optimal facilities: { ${comboLabel(bestCombo)} }.\nOptimal total assignment cost: ${bestCost.toFixed(0)}.`
           : `Exact brute-force p-Median finished, but no valid solution was found.`,
     })
   );

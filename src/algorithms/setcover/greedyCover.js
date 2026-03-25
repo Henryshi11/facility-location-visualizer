@@ -1,24 +1,30 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
-import { computeCoveredNodes } from '../shared/assignments';
+import {
+  computeCoveredDemandWeight,
+  computeCoveredNodes,
+  computeLambdaServiceCost,
+  getAssignments,
+} from '../shared/assignments';
 
 function buildScoreboard(candidates, bestId) {
   return candidates
     .slice()
     .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
+      if (b.coveredWeight !== a.coveredWeight) return b.coveredWeight - a.coveredWeight;
+      if (a.serviceCost !== b.serviceCost) return a.serviceCost - b.serviceCost;
       return String(a.id).localeCompare(String(b.id));
     })
     .map((item) => ({
-      id: item.id,
-      score: item.score,
+      id: `${item.id} (w=${item.coveredWeight}, c=${Number.isFinite(item.serviceCost) ? item.serviceCost.toFixed(0) : '∞'})`,
+      score: item.coveredWeight,
       isBest: item.id === bestId,
     }));
 }
 
 export function generateSetCoverGreedySteps(graph, params = {}) {
   const { nodes, distMatrix } = graph;
-  const radius = Math.max(1, params.radius ?? 30);
+  const lambdaValue = Math.max(1, params.lambdaValue ?? params.radius ?? 30);
 
   const steps = [];
   const selected = [];
@@ -33,17 +39,23 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
       scoreboard: [],
       metrics: {
         coveredCount: 0,
+        coveredDemandWeight: 0,
         total: nodes.length,
-        radius,
+        lambda: lambdaValue,
       },
       explanation:
-        `Initializing greedy covering.\n` +
-        `Goal: cover all demand nodes using radius ${radius}.\n` +
-        `Greedy rule: at each round, choose the facility that covers the most currently uncovered nodes.`,
+        `Initializing greedy λ-covering.\n` +
+        `Coverage rule: each node must lie within λ = ${lambdaValue} of some chosen facility.\n` +
+        `Primary goal: achieve full cover with as few facilities as possible.\n` +
+        `Greedy rule: choose the facility that covers the most uncovered demand weight; break ties by smaller weighted service cost.`,
     })
   );
 
+  let round = 0;
+
   while (covered.length < nodes.length) {
+    round += 1;
+
     const uncoveredSet = new Set(nodes.map((n) => n.id).filter((id) => !covered.includes(id)));
     const candidates = [];
 
@@ -56,11 +68,13 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
         scoreboard: [],
         metrics: {
           coveredCount: covered.length,
+          coveredDemandWeight: computeCoveredDemandWeight(nodes, covered),
           total: nodes.length,
-          radius,
+          lambda: lambdaValue,
+          round,
         },
         explanation:
-          `A new covering round begins.\n` +
+          `--- Covering round ${round} ---\n` +
           `Currently covered: ${covered.length} of ${nodes.length} nodes.`,
       })
     );
@@ -69,25 +83,36 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
       if (selected.includes(node.id)) continue;
 
       const trialSelected = [...selected, node.id];
-      const trialCovered = computeCoveredNodes(nodes, trialSelected, distMatrix, radius);
+      const trialCovered = computeCoveredNodes(nodes, trialSelected, distMatrix, lambdaValue);
+      const trialAssignments = getAssignments(nodes, trialSelected, distMatrix);
 
-      let newlyCoveredCount = 0;
-      for (const id of trialCovered) {
-        if (uncoveredSet.has(id)) newlyCoveredCount += 1;
+      let newlyCoveredWeight = 0;
+      for (const coveredId of trialCovered) {
+        if (uncoveredSet.has(coveredId)) {
+          const coveredNode = nodes.find((n) => n.id === coveredId);
+          newlyCoveredWeight += coveredNode?.weight ?? 1;
+        }
       }
+
+      const serviceCost = computeLambdaServiceCost(nodes, trialAssignments, lambdaValue);
 
       candidates.push({
         id: node.id,
-        score: newlyCoveredCount,
+        coveredWeight: newlyCoveredWeight,
+        serviceCost,
         covered: trialCovered,
+        assignments: trialAssignments,
       });
 
       const currentBest =
         candidates.reduce((best, item) => {
           if (!best) return item;
-          if (item.score > best.score) return item;
-          if (item.score === best.score) {
-            return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+          if (item.coveredWeight > best.coveredWeight) return item;
+          if (item.coveredWeight === best.coveredWeight) {
+            if (item.serviceCost < best.serviceCost) return item;
+            if (item.serviceCost === best.serviceCost) {
+              return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+            }
           }
           return best;
         }, null)?.id ?? null;
@@ -101,30 +126,38 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
           currentBest,
           covered: [...covered],
           evalCovered: trialCovered,
+          assignments: trialAssignments,
           scoreboard: buildScoreboard(candidates, currentBest),
           metrics: {
             coveredCount: covered.length,
+            coveredDemandWeight: computeCoveredDemandWeight(nodes, covered),
             total: nodes.length,
-            candidateGain: newlyCoveredCount,
-            radius,
+            candidateCoveredWeight: newlyCoveredWeight,
+            candidateServiceCost: serviceCost,
+            lambda: lambdaValue,
+            round,
           },
           explanation:
             `Evaluate candidate ${node.id}.\n` +
-            `It would newly cover ${newlyCoveredCount} currently uncovered node(s).`,
+            `It would newly cover demand weight ${newlyCoveredWeight}.\n` +
+            `Tie-break weighted service cost = ${Number.isFinite(serviceCost) ? serviceCost.toFixed(0) : '∞'}.`,
         })
       );
     }
 
     const bestCandidate = candidates.reduce((best, item) => {
       if (!best) return item;
-      if (item.score > best.score) return item;
-      if (item.score === best.score) {
-        return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+      if (item.coveredWeight > best.coveredWeight) return item;
+      if (item.coveredWeight === best.coveredWeight) {
+        if (item.serviceCost < best.serviceCost) return item;
+        if (item.serviceCost === best.serviceCost) {
+          return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+        }
       }
       return best;
     }, null);
 
-    if (!bestCandidate || bestCandidate.score <= 0) {
+    if (!bestCandidate || bestCandidate.coveredWeight <= 0) {
       steps.push(
         createSnapshot({
           type: STEP_TYPES.NO_PROGRESS,
@@ -134,12 +167,14 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
           scoreboard: buildScoreboard(candidates, null),
           metrics: {
             coveredCount: covered.length,
+            coveredDemandWeight: computeCoveredDemandWeight(nodes, covered),
             total: nodes.length,
-            radius,
+            lambda: lambdaValue,
+            round,
           },
           explanation:
-            `No candidate can cover any new node.\n` +
-            `The greedy covering algorithm stops without full coverage.`,
+            `No candidate can cover any new demand weight.\n` +
+            `The greedy λ-covering algorithm stops without full coverage.`,
         })
       );
       break;
@@ -155,18 +190,29 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
         selected: [...selected],
         currentBest: bestCandidate.id,
         covered: [...covered],
+        assignments: bestCandidate.assignments,
         scoreboard: buildScoreboard(candidates, bestCandidate.id),
         metrics: {
           coveredCount: covered.length,
+          coveredDemandWeight: computeCoveredDemandWeight(nodes, covered),
           total: nodes.length,
-          radius,
+          lambda: lambdaValue,
+          serviceCost: bestCandidate.serviceCost,
+          round,
         },
         explanation:
           `Select node ${bestCandidate.id} as a covering facility.\n` +
-          `Covered nodes so far: ${covered.length}/${nodes.length}.`,
+          `Covered nodes so far: ${covered.length}/${nodes.length}.\n` +
+          `Covered demand weight so far: ${computeCoveredDemandWeight(nodes, covered)}.`,
       })
     );
   }
+
+  const finalAssignments = getAssignments(nodes, selected, distMatrix);
+  const finalServiceCost =
+    covered.length === nodes.length
+      ? computeLambdaServiceCost(nodes, finalAssignments, lambdaValue)
+      : Infinity;
 
   steps.push(
     createSnapshot({
@@ -174,15 +220,20 @@ export function generateSetCoverGreedySteps(graph, params = {}) {
       phase: 'finish',
       selected: [...selected],
       covered: [...covered],
+      assignments: finalAssignments,
       metrics: {
         coveredCount: covered.length,
+        coveredDemandWeight: computeCoveredDemandWeight(nodes, covered),
         total: nodes.length,
-        radius,
+        lambda: lambdaValue,
+        facilityCount: selected.length,
+        serviceCost: finalServiceCost,
       },
       explanation:
-        `Greedy covering finished.\n` +
+        `Greedy λ-covering finished.\n` +
         `Selected facilities: { ${selected.join(', ')} }.\n` +
-        `Covered nodes: ${covered.length}/${nodes.length}.`,
+        `Covered nodes: ${covered.length}/${nodes.length}.\n` +
+        `Facility count: ${selected.length}.`,
     })
   );
 

@@ -7,19 +7,20 @@ export const MODELS = {
 export const MODEL_INFO = {
   [MODELS.PMEDIAN]: {
     name: 'p-Median',
-    description: 'Minimize weighted total distance',
-    short: 'Weighted total distance minimization',
+    description: 'Minimize total assignment cost Σ w_i d(i,S)',
+    short: 'Total weighted cost minimization',
   },
 
   [MODELS.PCENTER]: {
     name: 'p-Center',
-    description: 'Minimize the maximum distance to the nearest facility',
-    short: 'Worst-case distance minimization',
+    description: 'Minimize maximum assignment cost max_i w_i d(i,S)',
+    short: 'Worst weighted cost minimization',
   },
 
   [MODELS.SETCOVER]: {
-    name: 'Set Covering',
-    description: 'Cover all demand nodes using radius-based facility coverage',
-    short: 'Radius-based covering',
+    name: 'λ-Covering',
+    description:
+      'Find a minimum-cardinality full λ-cover; break ties by total weighted service cost',
+    short: 'λ-cover with cost tie-break',
   },
 };

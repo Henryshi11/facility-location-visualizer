@@ -1,15 +1,15 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
 import {
-  computeMaxAssignmentDistance,
+  computeMaxAssignmentCost,
   getAssignments,
 } from '../shared/assignments';
 
-function getDistanceScoreboard(nodes, assignments, bestId) {
+function getCostScoreboard(nodes, assignments, bestId) {
   return nodes
     .map((node) => ({
       id: node.id,
-      score: assignments[node.id]?.distance ?? Infinity,
+      score: assignments[node.id]?.cost ?? Infinity,
       isBest: node.id === bestId,
     }))
     .sort((a, b) => {
@@ -24,18 +24,18 @@ function chooseFarthestNode(nodes, assignments, selected) {
   for (const node of nodes) {
     if (selected.includes(node.id)) continue;
 
-    const distance = assignments[node.id]?.distance ?? Infinity;
+    const cost = assignments[node.id]?.cost ?? Infinity;
 
     if (!farthest) {
-      farthest = { id: node.id, distance };
+      farthest = { id: node.id, cost };
       continue;
     }
 
-    if (distance > farthest.distance) {
-      farthest = { id: node.id, distance };
-    } else if (distance === farthest.distance) {
+    if (cost > farthest.cost) {
+      farthest = { id: node.id, cost };
+    } else if (cost === farthest.cost) {
       if (String(node.id).localeCompare(String(farthest.id)) < 0) {
-        farthest = { id: node.id, distance };
+        farthest = { id: node.id, cost };
       }
     }
   }
@@ -57,14 +57,14 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
       selected: [],
       assignments: {},
       metrics: {
-        maxDistance: Infinity,
+        maxCost: Infinity,
         round: 0,
         p,
       },
       explanation:
         `Initializing farthest-first p-Center.\n` +
-        `Goal: choose ${p} facilities to reduce the worst-case distance.\n` +
-        `Heuristic rule: start with one facility, then repeatedly add the node that is farthest from the current facility set.`,
+        `Goal: choose ${p} facilities to reduce the worst weighted cost max_i w_i d(i,S).\n` +
+        `Heuristic rule: start with one facility, then repeatedly add the node with largest current weighted cost.`,
     })
   );
 
@@ -76,7 +76,7 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
   selected.push(firstFacility);
 
   let assignments = getAssignments(nodes, selected, distMatrix);
-  let maxDistance = computeMaxAssignmentDistance(nodes, assignments);
+  let maxCost = computeMaxAssignmentCost(nodes, assignments);
 
   steps.push(
     createSnapshot({
@@ -86,19 +86,19 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
       currentBest: firstFacility,
       assignments,
       metrics: {
-        maxDistance,
+        maxCost,
         round: 1,
         p,
       },
       explanation:
         `Seed the process with node ${firstFacility} as the first facility.\n` +
-        `Now measure each node's distance to its nearest selected facility.`,
+        `Now measure each node's weighted assignment cost w_i d(i,S).`,
     })
   );
 
   for (let round = 2; round <= p; round++) {
     assignments = getAssignments(nodes, selected, distMatrix);
-    maxDistance = computeMaxAssignmentDistance(nodes, assignments);
+    maxCost = computeMaxAssignmentCost(nodes, assignments);
 
     steps.push(
       createSnapshot({
@@ -106,16 +106,16 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
         phase: 'round_start',
         selected: [...selected],
         assignments,
-        scoreboard: getDistanceScoreboard(nodes, assignments, null),
+        scoreboard: getCostScoreboard(nodes, assignments, null),
         metrics: {
-          maxDistance,
+          maxCost,
           round,
           p,
         },
         explanation:
           `--- Round ${round} of ${p} ---\n` +
-          `Compute each node's distance to the nearest selected facility.\n` +
-          `The next facility is the farthest uncovered demand point.`,
+          `Compute each node's weighted cost to the nearest selected facility.\n` +
+          `The next facility is chosen from the largest-cost demand point.`,
       })
     );
 
@@ -129,7 +129,7 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
           selected: [...selected],
           assignments,
           metrics: {
-            maxDistance,
+            maxCost,
             round,
             p,
           },
@@ -147,22 +147,22 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
         evaluating: farthest.id,
         currentBest: farthest.id,
         assignments,
-        scoreboard: getDistanceScoreboard(nodes, assignments, farthest.id),
+        scoreboard: getCostScoreboard(nodes, assignments, farthest.id),
         metrics: {
-          maxDistance,
+          maxCost,
           round,
           p,
         },
         explanation:
-          `The farthest node is ${farthest.id}.\n` +
-          `Its nearest-facility distance is ${Number.isFinite(farthest.distance) ? farthest.distance.toFixed(0) : '∞'}.\n` +
+          `The current worst-cost node is ${farthest.id}.\n` +
+          `Its weighted assignment cost is ${Number.isFinite(farthest.cost) ? farthest.cost.toFixed(0) : '∞'}.\n` +
           `Farthest-first chooses this node as the next facility.`,
       })
     );
 
     selected.push(farthest.id);
     assignments = getAssignments(nodes, selected, distMatrix);
-    maxDistance = computeMaxAssignmentDistance(nodes, assignments);
+    maxCost = computeMaxAssignmentCost(nodes, assignments);
 
     steps.push(
       createSnapshot({
@@ -171,22 +171,22 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
         selected: [...selected],
         currentBest: farthest.id,
         assignments,
-        scoreboard: getDistanceScoreboard(nodes, assignments, null),
+        scoreboard: getCostScoreboard(nodes, assignments, null),
         metrics: {
-          maxDistance,
+          maxCost,
           round,
           p,
         },
         explanation:
           `Select node ${farthest.id} as the next facility.\n` +
           `Current facility set: { ${selected.join(', ')} }.\n` +
-          `New maximum assignment distance: ${maxDistance.toFixed(0)}.`,
+          `New maximum weighted assignment cost: ${maxCost.toFixed(0)}.`,
       })
     );
   }
 
   assignments = getAssignments(nodes, selected, distMatrix);
-  maxDistance = computeMaxAssignmentDistance(nodes, assignments);
+  maxCost = computeMaxAssignmentCost(nodes, assignments);
 
   steps.push(
     createSnapshot({
@@ -195,14 +195,14 @@ export function generatePCenterFarthestFirstSteps(graph, params = {}) {
       selected: [...selected],
       assignments,
       metrics: {
-        maxDistance,
+        maxCost,
         round: selected.length,
         p,
       },
       explanation:
         `Farthest-first p-Center finished.\n` +
         `Final facilities: { ${selected.join(', ')} }.\n` +
-        `Final maximum assignment distance: ${maxDistance.toFixed(0)}.`,
+        `Final maximum weighted assignment cost: ${maxCost.toFixed(0)}.`,
     })
   );
 

@@ -1,7 +1,7 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
 import {
-  computeWeightedObjective,
+  computeTotalAssignmentCost,
   getAssignments,
 } from '../shared/assignments';
 
@@ -34,41 +34,42 @@ export function generatePMedianGreedySteps(graph, params = {}) {
       assignments: {},
       scoreboard: [],
       metrics: {
-        objective: Infinity,
+        totalCost: Infinity,
         round: 0,
         p,
       },
       explanation:
         `Initializing greedy p-Median.\n` +
-        `Goal: choose ${p} facilities to minimize weighted total distance.\n` +
-        `Greedy rule: at each round, add the facility that gives the best immediate objective value.`,
+        `Goal: choose ${p} facilities to minimize total assignment cost.\n` +
+        `Here cost means weight × distance, so the objective is Σ w_i d(i, S).\n` +
+        `Greedy rule: at each round, add the facility that gives the best immediate total cost.`,
     })
   );
 
   for (let round = 1; round <= p; round++) {
     const candidates = [];
 
+    const currentAssignments = getAssignments(nodes, selected, distMatrix);
+    const currentCost =
+      selected.length > 0
+        ? computeTotalAssignmentCost(nodes, currentAssignments)
+        : Infinity;
+
     steps.push(
       createSnapshot({
         type: STEP_TYPES.ROUND_START,
         phase: 'round_start',
         selected: [...selected],
-        assignments: getAssignments(nodes, selected, distMatrix),
+        assignments: currentAssignments,
         scoreboard: [],
         metrics: {
-          objective:
-            selected.length > 0
-              ? computeWeightedObjective(
-                  nodes,
-                  getAssignments(nodes, selected, distMatrix)
-                )
-              : Infinity,
+          totalCost: currentCost,
           round,
           p,
         },
         explanation:
           `--- Round ${round} of ${p} ---\n` +
-          `Try every unselected node as the next facility and compare the resulting objective.`,
+          `Try every unselected node as the next facility and compare total assignment cost Σ w_i d(i,S).`,
       })
     );
 
@@ -77,25 +78,23 @@ export function generatePMedianGreedySteps(graph, params = {}) {
 
       const trialFacilities = [...selected, node.id];
       const assignments = getAssignments(nodes, trialFacilities, distMatrix);
-      const objective = computeWeightedObjective(nodes, assignments);
+      const totalCost = computeTotalAssignmentCost(nodes, assignments);
 
       candidates.push({
         id: node.id,
-        score: objective,
+        score: totalCost,
         assignments,
       });
 
       const currentBest =
-        candidates.length === 0
-          ? null
-          : candidates.reduce((best, item) => {
-              if (!best) return item;
-              if (item.score < best.score) return item;
-              if (item.score === best.score) {
-                return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
-              }
-              return best;
-            }, null)?.id ?? null;
+        candidates.reduce((best, item) => {
+          if (!best) return item;
+          if (item.score < best.score) return item;
+          if (item.score === best.score) {
+            return String(item.id).localeCompare(String(best.id)) < 0 ? item : best;
+          }
+          return best;
+        }, null)?.id ?? null;
 
       steps.push(
         createSnapshot({
@@ -107,13 +106,13 @@ export function generatePMedianGreedySteps(graph, params = {}) {
           assignments,
           scoreboard: buildScoreboard(candidates, currentBest),
           metrics: {
-            objective,
+            totalCost,
             round,
             p,
           },
           explanation:
             `Evaluate candidate ${node.id}.\n` +
-            `If selected next, the weighted total distance becomes ${objective.toFixed(0)}.`,
+            `If selected next, total assignment cost becomes ${totalCost.toFixed(0)}.`,
         })
       );
     }
@@ -133,16 +132,10 @@ export function generatePMedianGreedySteps(graph, params = {}) {
           type: STEP_TYPES.NO_PROGRESS,
           phase: 'no_progress',
           selected: [...selected],
-          assignments: getAssignments(nodes, selected, distMatrix),
+          assignments: currentAssignments,
           scoreboard: [],
           metrics: {
-            objective:
-              selected.length > 0
-                ? computeWeightedObjective(
-                    nodes,
-                    getAssignments(nodes, selected, distMatrix)
-                  )
-                : Infinity,
+            totalCost: currentCost,
             round,
             p,
           },
@@ -163,20 +156,20 @@ export function generatePMedianGreedySteps(graph, params = {}) {
         assignments: bestCandidate.assignments,
         scoreboard: buildScoreboard(candidates, bestCandidate.id),
         metrics: {
-          objective: bestCandidate.score,
+          totalCost: bestCandidate.score,
           round,
           p,
         },
         explanation:
           `Select node ${bestCandidate.id} as the next facility.\n` +
           `Current facility set: { ${selected.join(', ')} }.\n` +
-          `Current weighted total distance: ${bestCandidate.score.toFixed(0)}.`,
+          `Current total assignment cost: ${bestCandidate.score.toFixed(0)}.`,
       })
     );
   }
 
   const finalAssignments = getAssignments(nodes, selected, distMatrix);
-  const finalObjective = computeWeightedObjective(nodes, finalAssignments);
+  const finalCost = computeTotalAssignmentCost(nodes, finalAssignments);
 
   steps.push(
     createSnapshot({
@@ -186,14 +179,14 @@ export function generatePMedianGreedySteps(graph, params = {}) {
       assignments: finalAssignments,
       scoreboard: [],
       metrics: {
-        objective: finalObjective,
+        totalCost: finalCost,
         round: selected.length,
         p,
       },
       explanation:
         `Greedy p-Median finished.\n` +
         `Final facilities: { ${selected.join(', ')} }.\n` +
-        `Final weighted total distance: ${finalObjective.toFixed(0)}.`,
+        `Final total assignment cost: ${finalCost.toFixed(0)}.`,
     })
   );
 

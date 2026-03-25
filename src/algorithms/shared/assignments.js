@@ -27,21 +27,43 @@ export function getAssignments(nodes, selectedFacilities, distMatrix) {
     assignments[node.id] = {
       facility: bestFacility,
       distance: bestDistance,
+      cost: (node.weight ?? 1) * bestDistance,
     };
   }
 
   return assignments;
 }
 
-export function computeWeightedObjective(nodes, assignments) {
+export function computeNodeAssignmentCost(node, assignments) {
+  const distance = assignments[node.id]?.distance ?? Infinity;
+  return (node.weight ?? 1) * distance;
+}
+
+export function computeTotalAssignmentCost(nodes, assignments) {
   let total = 0;
 
   for (const node of nodes) {
-    const distance = assignments[node.id]?.distance ?? Infinity;
-    total += (node.weight ?? 1) * distance;
+    total += computeNodeAssignmentCost(node, assignments);
   }
 
   return total;
+}
+
+export function computeWeightedObjective(nodes, assignments) {
+  return computeTotalAssignmentCost(nodes, assignments);
+}
+
+export function computeMaxAssignmentCost(nodes, assignments) {
+  let maxCost = 0;
+
+  for (const node of nodes) {
+    const cost = computeNodeAssignmentCost(node, assignments);
+    if (cost > maxCost) {
+      maxCost = cost;
+    }
+  }
+
+  return maxCost;
 }
 
 export function computeMaxAssignmentDistance(nodes, assignments) {
@@ -57,7 +79,7 @@ export function computeMaxAssignmentDistance(nodes, assignments) {
   return maxDistance;
 }
 
-export function computeCoveredNodes(nodes, selectedFacilities, distMatrix, radius) {
+export function computeCoveredNodes(nodes, selectedFacilities, distMatrix, lambdaValue) {
   const covered = [];
 
   for (const node of nodes) {
@@ -65,7 +87,7 @@ export function computeCoveredNodes(nodes, selectedFacilities, distMatrix, radiu
 
     for (const facilityId of selectedFacilities) {
       const d = getDistance(distMatrix, node.id, facilityId);
-      if (d <= radius) {
+      if (d <= lambdaValue) {
         isCovered = true;
         break;
       }
@@ -77,4 +99,31 @@ export function computeCoveredNodes(nodes, selectedFacilities, distMatrix, radiu
   }
 
   return covered;
+}
+
+export function computeCoveredDemandWeight(nodes, coveredNodeIds) {
+  const coveredSet = new Set(coveredNodeIds);
+  let total = 0;
+
+  for (const node of nodes) {
+    if (coveredSet.has(node.id)) {
+      total += node.weight ?? 1;
+    }
+  }
+
+  return total;
+}
+
+export function computeLambdaServiceCost(nodes, assignments, lambdaValue) {
+  let total = 0;
+
+  for (const node of nodes) {
+    const distance = assignments[node.id]?.distance ?? Infinity;
+    if (distance > lambdaValue) {
+      return Infinity;
+    }
+    total += (node.weight ?? 1) * distance;
+  }
+
+  return total;
 }

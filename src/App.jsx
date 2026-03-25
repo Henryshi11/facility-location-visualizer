@@ -32,8 +32,8 @@ function getRoundLabel(snapshot, model) {
   if (!snapshot) return '-';
 
   if (model === MODELS.SETCOVER) {
-    if (snapshot.metrics?.radius != null) {
-      return `radius ${snapshot.metrics.radius}`;
+    if (snapshot.metrics?.lambda != null) {
+      return `λ = ${snapshot.metrics.lambda}`;
     }
     return snapshot.metrics?.round ?? '-';
   }
@@ -53,6 +53,33 @@ function getRoundLabel(snapshot, model) {
   return '-';
 }
 
+function getPrimaryMetric(snapshot, model) {
+  if (!snapshot) return null;
+
+  if (model === MODELS.PMEDIAN) {
+    return {
+      label: 'Total Cost',
+      value: snapshot.metrics?.totalCost,
+    };
+  }
+
+  if (model === MODELS.PCENTER) {
+    return {
+      label: 'Max Cost',
+      value: snapshot.metrics?.maxCost,
+    };
+  }
+
+  if (model === MODELS.SETCOVER) {
+    return {
+      label: 'Service Cost',
+      value: snapshot.metrics?.serviceCost,
+    };
+  }
+
+  return null;
+}
+
 export default function App() {
   const [model, setModel] = useState(MODELS.PMEDIAN);
   const [algorithm, setAlgorithm] = useState(ALGORITHMS.GREEDY_ADDITION);
@@ -63,7 +90,7 @@ export default function App() {
   );
 
   const [p, setP] = useState(2);
-  const [radius, setRadius] = useState(30);
+  const [lambdaValue, setLambdaValue] = useState(30);
 
   const [snapshots, setSnapshots] = useState([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -96,13 +123,13 @@ export default function App() {
       model,
       algorithm,
       graph,
-      params: { p, radius },
+      params: { p, lambdaValue },
     });
 
     setSnapshots(nextSnapshots);
     setCurrentStepIndex(0);
     setIsPlaying(false);
-  }, [model, algorithm, graph, p, radius]);
+  }, [model, algorithm, graph, p, lambdaValue]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -123,6 +150,7 @@ export default function App() {
 
   const currentSnapshot = snapshots[currentStepIndex] ?? null;
   const modelInfo = MODEL_INFO[model];
+  const primaryMetric = getPrimaryMetric(currentSnapshot, model);
 
   const handleGenerateRandomPath = () => {
     const randomGraph = generateRandomPathGraph();
@@ -184,7 +212,7 @@ export default function App() {
             >
               <option value={MODELS.PMEDIAN}>p-Median</option>
               <option value={MODELS.PCENTER}>p-Center</option>
-              <option value={MODELS.SETCOVER}>Set Covering</option>
+              <option value={MODELS.SETCOVER}>λ-Covering</option>
             </select>
           </div>
 
@@ -217,12 +245,12 @@ export default function App() {
 
           {model === MODELS.SETCOVER ? (
             <div style={panelStyle}>
-              <div style={labelStyle}>Radius</div>
+              <div style={labelStyle}>λ (Coverage Threshold)</div>
               <input
                 type="number"
                 min="1"
-                value={radius}
-                onChange={(event) => setRadius(Number(event.target.value))}
+                value={lambdaValue}
+                onChange={(event) => setLambdaValue(Number(event.target.value))}
                 style={inputStyle}
               />
             </div>
@@ -347,6 +375,35 @@ export default function App() {
             <div style={metaLineStyle}>
               <strong>Phase:</strong> <span>{currentSnapshot?.phase ?? '-'}</span>
             </div>
+
+            {primaryMetric?.value != null && (
+              <div style={metaLineStyle}>
+                <strong>{primaryMetric.label}:</strong>{' '}
+                <span>{Number.isFinite(primaryMetric.value) ? primaryMetric.value : '∞'}</span>
+              </div>
+            )}
+
+            {currentSnapshot?.metrics?.facilityCount != null && (
+              <div style={metaLineStyle}>
+                <strong>Facility Count:</strong> <span>{currentSnapshot.metrics.facilityCount}</span>
+              </div>
+            )}
+
+            {currentSnapshot?.metrics?.coveredCount != null && (
+              <div style={metaLineStyle}>
+                <strong>Covered:</strong>{' '}
+                <span>
+                  {currentSnapshot.metrics.coveredCount}/{currentSnapshot.metrics.total ?? 0}
+                </span>
+              </div>
+            )}
+
+            {currentSnapshot?.metrics?.coveredDemandWeight != null && (
+              <div style={metaLineStyle}>
+                <strong>Covered Demand Weight:</strong>{' '}
+                <span>{currentSnapshot.metrics.coveredDemandWeight}</span>
+              </div>
+            )}
 
             <div style={{ marginTop: '18px' }}>
               <input

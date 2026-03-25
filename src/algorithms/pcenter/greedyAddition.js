@@ -1,7 +1,7 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
 import {
-  computeMaxAssignmentDistance,
+  computeMaxAssignmentCost,
   getAssignments,
 } from '../shared/assignments';
 
@@ -34,41 +34,42 @@ export function generatePCenterGreedySteps(graph, params = {}) {
       assignments: {},
       scoreboard: [],
       metrics: {
-        maxDistance: Infinity,
+        maxCost: Infinity,
         round: 0,
         p,
       },
       explanation:
         `Initializing greedy p-Center.\n` +
-        `Goal: choose ${p} facilities to minimize the worst-case distance.\n` +
-        `Greedy rule: at each round, add the facility that gives the best immediate maximum distance.`,
+        `Goal: choose ${p} facilities to minimize the worst assignment cost.\n` +
+        `Here cost means weight × distance, so the objective is max_i w_i d(i,S).\n` +
+        `Greedy rule: at each round, add the facility that gives the best immediate maximum cost.`,
     })
   );
 
   for (let round = 1; round <= p; round++) {
     const candidates = [];
 
+    const currentAssignments = getAssignments(nodes, selected, distMatrix);
+    const currentMaxCost =
+      selected.length > 0
+        ? computeMaxAssignmentCost(nodes, currentAssignments)
+        : Infinity;
+
     steps.push(
       createSnapshot({
         type: STEP_TYPES.ROUND_START,
         phase: 'round_start',
         selected: [...selected],
-        assignments: getAssignments(nodes, selected, distMatrix),
+        assignments: currentAssignments,
         scoreboard: [],
         metrics: {
-          maxDistance:
-            selected.length > 0
-              ? computeMaxAssignmentDistance(
-                  nodes,
-                  getAssignments(nodes, selected, distMatrix)
-                )
-              : Infinity,
+          maxCost: currentMaxCost,
           round,
           p,
         },
         explanation:
           `--- Round ${round} of ${p} ---\n` +
-          `Try every unselected node as the next facility and compare the resulting worst-case distance.`,
+          `Try every unselected node as the next facility and compare the resulting worst weighted cost.`,
       })
     );
 
@@ -77,11 +78,11 @@ export function generatePCenterGreedySteps(graph, params = {}) {
 
       const trialFacilities = [...selected, node.id];
       const assignments = getAssignments(nodes, trialFacilities, distMatrix);
-      const maxDistance = computeMaxAssignmentDistance(nodes, assignments);
+      const maxCost = computeMaxAssignmentCost(nodes, assignments);
 
       candidates.push({
         id: node.id,
-        score: maxDistance,
+        score: maxCost,
         assignments,
       });
 
@@ -105,13 +106,13 @@ export function generatePCenterGreedySteps(graph, params = {}) {
           assignments,
           scoreboard: buildScoreboard(candidates, currentBest),
           metrics: {
-            maxDistance,
+            maxCost,
             round,
             p,
           },
           explanation:
             `Evaluate candidate ${node.id}.\n` +
-            `If selected next, the maximum assignment distance becomes ${maxDistance.toFixed(0)}.`,
+            `If selected next, the maximum weighted assignment cost becomes ${maxCost.toFixed(0)}.`,
         })
       );
     }
@@ -131,16 +132,10 @@ export function generatePCenterGreedySteps(graph, params = {}) {
           type: STEP_TYPES.NO_PROGRESS,
           phase: 'no_progress',
           selected: [...selected],
-          assignments: getAssignments(nodes, selected, distMatrix),
+          assignments: currentAssignments,
           scoreboard: [],
           metrics: {
-            maxDistance:
-              selected.length > 0
-                ? computeMaxAssignmentDistance(
-                    nodes,
-                    getAssignments(nodes, selected, distMatrix)
-                  )
-                : Infinity,
+            maxCost: currentMaxCost,
             round,
             p,
           },
@@ -161,20 +156,20 @@ export function generatePCenterGreedySteps(graph, params = {}) {
         assignments: bestCandidate.assignments,
         scoreboard: buildScoreboard(candidates, bestCandidate.id),
         metrics: {
-          maxDistance: bestCandidate.score,
+          maxCost: bestCandidate.score,
           round,
           p,
         },
         explanation:
           `Select node ${bestCandidate.id} as the next facility.\n` +
           `Current facility set: { ${selected.join(', ')} }.\n` +
-          `Current maximum assignment distance: ${bestCandidate.score.toFixed(0)}.`,
+          `Current maximum weighted assignment cost: ${bestCandidate.score.toFixed(0)}.`,
       })
     );
   }
 
   const finalAssignments = getAssignments(nodes, selected, distMatrix);
-  const finalMaxDistance = computeMaxAssignmentDistance(nodes, finalAssignments);
+  const finalMaxCost = computeMaxAssignmentCost(nodes, finalAssignments);
 
   steps.push(
     createSnapshot({
@@ -183,14 +178,14 @@ export function generatePCenterGreedySteps(graph, params = {}) {
       selected: [...selected],
       assignments: finalAssignments,
       metrics: {
-        maxDistance: finalMaxDistance,
+        maxCost: finalMaxCost,
         round: selected.length,
         p,
       },
       explanation:
         `Greedy p-Center finished.\n` +
         `Final facilities: { ${selected.join(', ')} }.\n` +
-        `Final maximum assignment distance: ${finalMaxDistance.toFixed(0)}.`,
+        `Final maximum weighted assignment cost: ${finalMaxCost.toFixed(0)}.`,
     })
   );
 

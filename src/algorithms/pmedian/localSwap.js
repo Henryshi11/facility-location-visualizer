@@ -1,7 +1,7 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
 import {
-  computeWeightedObjective,
+  computeTotalAssignmentCost,
   getAssignments,
 } from '../shared/assignments';
 
@@ -16,28 +16,28 @@ function buildGreedySeed(nodes, distMatrix, p) {
 
       const trial = [...selected, node.id];
       const assignments = getAssignments(nodes, trial, distMatrix);
-      const objective = computeWeightedObjective(nodes, assignments);
+      const totalCost = computeTotalAssignmentCost(nodes, assignments);
 
       if (!bestCandidate) {
         bestCandidate = {
           id: node.id,
-          score: objective,
+          score: totalCost,
           assignments,
         };
         continue;
       }
 
-      if (objective < bestCandidate.score) {
+      if (totalCost < bestCandidate.score) {
         bestCandidate = {
           id: node.id,
-          score: objective,
+          score: totalCost,
           assignments,
         };
-      } else if (objective === bestCandidate.score) {
+      } else if (totalCost === bestCandidate.score) {
         if (String(node.id).localeCompare(String(bestCandidate.id)) < 0) {
           bestCandidate = {
             id: node.id,
-            score: objective,
+            score: totalCost,
             assignments,
           };
         }
@@ -72,7 +72,7 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
   const steps = [];
   let selected = buildGreedySeed(nodes, distMatrix, p);
   let assignments = getAssignments(nodes, selected, distMatrix);
-  let objective = computeWeightedObjective(nodes, assignments);
+  let totalCost = computeTotalAssignmentCost(nodes, assignments);
 
   steps.push(
     createSnapshot({
@@ -81,13 +81,13 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
       selected: [...selected],
       assignments,
       metrics: {
-        objective,
+        totalCost,
         p,
         iteration: 0,
       },
       explanation:
         `Initializing local-swap p-Median.\n` +
-        `Start from a greedy seed solution, then try swap moves to improve the weighted total distance.`,
+        `Start from a greedy seed solution, then try swap moves to improve total assignment cost Σ w_i d(i,S).`,
     })
   );
 
@@ -105,7 +105,7 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
         selected: [...selected],
         assignments,
         metrics: {
-          objective,
+          totalCost,
           p,
           iteration,
         },
@@ -128,12 +128,12 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
         );
 
         const trialAssignments = getAssignments(nodes, normalizedTrial, distMatrix);
-        const trialObjective = computeWeightedObjective(nodes, trialAssignments);
+        const trialCost = computeTotalAssignmentCost(nodes, trialAssignments);
         const swapLabel = `${outId}→${inNode.id}`;
 
         scoreboardEntries.push({
           id: swapLabel,
-          score: trialObjective,
+          score: trialCost,
         });
 
         steps.push(
@@ -148,8 +148,8 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
               bestSwap ? `${bestSwap.outId}→${bestSwap.inId}` : null
             ),
             metrics: {
-              objective: trialObjective,
-              currentObjective: objective,
+              totalCost: trialCost,
+              currentTotalCost: totalCost,
               p,
               iteration,
             },
@@ -161,15 +161,15 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
             explanation:
               `Try swapping out ${outId} and swapping in ${inNode.id}.\n` +
               `Trial facility set: { ${normalizedTrial.join(', ')} }.\n` +
-              `Trial weighted total distance: ${trialObjective.toFixed(0)}.`,
+              `Trial total assignment cost: ${trialCost.toFixed(0)}.`,
           })
         );
 
         if (
-          trialObjective < objective &&
+          trialCost < totalCost &&
           (!bestSwap ||
-            trialObjective < bestSwap.score ||
-            (trialObjective === bestSwap.score &&
+            trialCost < bestSwap.score ||
+            (trialCost === bestSwap.score &&
               String(swapLabel).localeCompare(`${bestSwap.outId}→${bestSwap.inId}`) < 0))
         ) {
           bestSwap = {
@@ -177,7 +177,7 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
             inId: inNode.id,
             facilities: normalizedTrial,
             assignments: trialAssignments,
-            score: trialObjective,
+            score: trialCost,
           };
         }
       }
@@ -186,7 +186,7 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
     if (bestSwap) {
       selected = [...bestSwap.facilities];
       assignments = bestSwap.assignments;
-      objective = bestSwap.score;
+      totalCost = bestSwap.score;
       improved = true;
 
       steps.push(
@@ -201,7 +201,7 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
             `${bestSwap.outId}→${bestSwap.inId}`
           ),
           metrics: {
-            objective,
+            totalCost,
             p,
             iteration,
           },
@@ -212,7 +212,7 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
           explanation:
             `Accept improving swap ${bestSwap.outId}→${bestSwap.inId}.\n` +
             `New facility set: { ${selected.join(', ')} }.\n` +
-            `Improved weighted total distance: ${objective.toFixed(0)}.`,
+            `Improved total assignment cost: ${totalCost.toFixed(0)}.`,
         })
       );
     } else {
@@ -224,7 +224,7 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
           assignments,
           scoreboard: buildScoreboard(scoreboardEntries, null),
           metrics: {
-            objective,
+            totalCost,
             p,
             iteration,
           },
@@ -243,14 +243,14 @@ export function generatePMedianLocalSwapSteps(graph, params = {}) {
       selected: [...selected],
       assignments,
       metrics: {
-        objective,
+        totalCost,
         p,
         iteration,
       },
       explanation:
         `Local-swap p-Median finished.\n` +
         `Final facilities: { ${selected.join(', ')} }.\n` +
-        `Final weighted total distance: ${objective.toFixed(0)}.`,
+        `Final total assignment cost: ${totalCost.toFixed(0)}.`,
     })
   );
 

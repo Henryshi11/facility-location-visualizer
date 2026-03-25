@@ -1,7 +1,7 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
 import {
-  computeMaxAssignmentDistance,
+  computeMaxAssignmentCost,
   getAssignments,
 } from '../shared/assignments';
 
@@ -54,7 +54,7 @@ export function generatePCenterExactBruteforceSteps(graph, params = {}) {
 
   let bestCombo = null;
   let bestAssignments = {};
-  let bestMaxDistance = Infinity;
+  let bestMaxCost = Infinity;
 
   steps.push(
     createSnapshot({
@@ -64,26 +64,26 @@ export function generatePCenterExactBruteforceSteps(graph, params = {}) {
       assignments: {},
       scoreboard: [],
       metrics: {
-        maxDistance: Infinity,
+        maxCost: Infinity,
         checked: 0,
         totalCombos: combos.length,
         p,
       },
       explanation:
         `Initializing exact brute-force p-Center.\n` +
-        `Goal: choose ${p} facilities to minimize the maximum distance.\n` +
+        `Goal: choose ${p} facilities to minimize the maximum weighted assignment cost max_i w_i d(i,S).\n` +
         `This method checks every possible size-${p} facility set, so it is only suitable for small graphs.`,
     })
   );
 
   combos.forEach((combo, index) => {
     const assignments = getAssignments(nodes, combo, distMatrix);
-    const maxDistance = computeMaxAssignmentDistance(nodes, assignments);
+    const maxCost = computeMaxAssignmentCost(nodes, assignments);
     const label = comboLabel(combo);
 
     scoreboardEntries.push({
       id: label,
-      score: maxDistance,
+      score: maxCost,
     });
 
     steps.push(
@@ -98,20 +98,20 @@ export function generatePCenterExactBruteforceSteps(graph, params = {}) {
           bestCombo ? comboLabel(bestCombo) : null
         ),
         metrics: {
-          maxDistance,
+          maxCost,
           checked: index + 1,
           totalCombos: combos.length,
           p,
         },
         explanation:
           `Evaluating facility set { ${label} }.\n` +
-          `Maximum assignment distance = ${maxDistance.toFixed(0)}.\n` +
+          `Maximum weighted assignment cost = ${maxCost.toFixed(0)}.\n` +
           `Checked ${index + 1} of ${combos.length} candidate sets.`,
       })
     );
 
-    if (maxDistance < bestMaxDistance) {
-      bestMaxDistance = maxDistance;
+    if (maxCost < bestMaxCost) {
+      bestMaxCost = maxCost;
       bestCombo = [...combo];
       bestAssignments = assignments;
 
@@ -124,14 +124,14 @@ export function generatePCenterExactBruteforceSteps(graph, params = {}) {
           assignments: bestAssignments,
           scoreboard: buildScoreboard(scoreboardEntries, comboLabel(bestCombo)),
           metrics: {
-            maxDistance: bestMaxDistance,
+            maxCost: bestMaxCost,
             checked: index + 1,
             totalCombos: combos.length,
             p,
           },
           explanation:
             `New best solution found: { ${comboLabel(bestCombo)} }.\n` +
-            `Best maximum distance is now ${bestMaxDistance.toFixed(0)}.`,
+            `Best maximum weighted assignment cost is now ${bestMaxCost.toFixed(0)}.`,
         })
       );
     }
@@ -148,14 +148,14 @@ export function generatePCenterExactBruteforceSteps(graph, params = {}) {
         bestCombo ? comboLabel(bestCombo) : null
       ),
       metrics: {
-        maxDistance: bestMaxDistance,
+        maxCost: bestMaxCost,
         checked: combos.length,
         totalCombos: combos.length,
         p,
       },
       explanation:
         bestCombo
-          ? `Exact brute-force p-Center finished.\nFinal optimal facilities: { ${comboLabel(bestCombo)} }.\nOptimal maximum distance: ${bestMaxDistance.toFixed(0)}.`
+          ? `Exact brute-force p-Center finished.\nFinal optimal facilities: { ${comboLabel(bestCombo)} }.\nOptimal maximum weighted assignment cost: ${bestMaxCost.toFixed(0)}.`
           : `Exact brute-force p-Center finished, but no valid solution was found.`,
     })
   );
