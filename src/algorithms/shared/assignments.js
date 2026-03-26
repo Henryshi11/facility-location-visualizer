@@ -45,6 +45,11 @@ export function computeWeightedObjective(nodes, assignments) {
   return total;
 }
 
+// p-median files already import this name, so export it explicitly.
+export function computeTotalAssignmentCost(nodes, assignments) {
+  return computeWeightedObjective(nodes, assignments);
+}
+
 export function computeMaxAssignmentDistance(nodes, assignments) {
   let maxDistance = 0;
 

@@ -58,8 +58,8 @@ function getPrimaryMetric(snapshot, model) {
 
   if (model === MODELS.PMEDIAN) {
     return {
-      label: 'Objective',
-      value: snapshot.metrics?.objective,
+      label: 'Total Cost',
+      value: snapshot.metrics?.totalCost,
     };
   }
 
@@ -325,7 +325,7 @@ export default function App() {
             </span>
             <span style={legendItemStyle}>
               <span style={{ ...legendDotStyle, background: '#22c55e' }} />
-              Feasible node
+              Feasible / covered node
             </span>
             <span style={legendItemStyle}>
               <span
