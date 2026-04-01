@@ -1,116 +1,121 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
-function drawSquare(ctx, x, y, size) {
+function drawCircle(ctx, x, y, r) {
   ctx.beginPath();
-  ctx.rect(x - size, y - size, size * 2, size * 2);
+  ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 }
 
-function drawDiamond(ctx, x, y, size) {
+function drawSquare(ctx, x, y, r) {
   ctx.beginPath();
-  ctx.moveTo(x, y - size);
-  ctx.lineTo(x + size, y);
-  ctx.lineTo(x, y + size);
-  ctx.lineTo(x - size, y);
+  ctx.rect(x - r, y - r, r * 2, r * 2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawDiamond(ctx, x, y, r) {
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - r, y);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 }
 
-function drawCircle(ctx, x, y, size) {
-  ctx.beginPath();
-  ctx.arc(x, y, size, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+function getOrderedNodes(graph) {
+  return [...(graph?.nodes ?? [])].sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 
-function getNodeById(graph, id) {
-  return graph.nodes.find((node) => node.id === id);
+function getEdgeLengthMap(graph) {
+  const map = new Map();
+  for (const edge of graph?.edges ?? []) {
+    map.set(`${edge.u}::${edge.v}`, edge.length ?? 1);
+    map.set(`${edge.v}::${edge.u}`, edge.length ?? 1);
+  }
+  return map;
 }
 
-function getNodeState(snapshot, nodeId) {
-  return {
-    isSelected: snapshot?.selected?.includes(nodeId),
-    isEvaluating: snapshot?.evaluating === nodeId,
-    isCovered: snapshot?.covered?.includes(nodeId),
-    isEvalCovered: snapshot?.evalCovered?.includes(nodeId),
-    isCurrentBest: snapshot?.currentBest === nodeId,
-  };
+function computePathPositions(graph) {
+  const nodes = getOrderedNodes(graph);
+  const edgeMap = getEdgeLengthMap(graph);
+
+  let cumulative = 0;
+  return nodes.map((node, index) => {
+    if (index > 0) {
+      const prev = nodes[index - 1];
+      cumulative += edgeMap.get(`${prev.id}::${node.id}`) ?? 1;
+    }
+
+    return {
+      ...node,
+      pathPosition: cumulative,
+    };
+  });
 }
 
-function getDisplayMetrics(container) {
-  const rect = container.getBoundingClientRect();
-  return {
-    width: Math.max(400, rect.width),
-    height: Math.max(340, rect.height),
-  };
-}
+function interpolatePoint(nodes, scalar) {
+  if (!nodes.length) return null;
+  if (scalar <= nodes[0].pathPosition) return { x: nodes[0].x, y: nodes[0].y };
+  if (scalar >= nodes[nodes.length - 1].pathPosition) {
+    return {
+      x: nodes[nodes.length - 1].x,
+      y: nodes[nodes.length - 1].y,
+    };
+  }
 
-function drawEdgeLengthLabel(ctx, x, y, text) {
-  const paddingX = 6;
-  const paddingY = 3;
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const a = nodes[i];
+    const b = nodes[i + 1];
 
-  ctx.font = '12px Inter, Arial, sans-serif';
-  const metrics = ctx.measureText(text);
-  const width = metrics.width + paddingX * 2;
-  const height = 18;
+    if (scalar >= a.pathPosition && scalar <= b.pathPosition) {
+      const span = b.pathPosition - a.pathPosition || 1;
+      const t = (scalar - a.pathPosition) / span;
+      return {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t,
+      };
+    }
+  }
 
-  ctx.fillStyle = 'rgba(2, 6, 23, 0.88)';
-  ctx.strokeStyle = '#1e293b';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(x - width / 2, y - height / 2, width, height, 6);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.fillStyle = '#94a3b8';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, x, y + 0.5);
+  return null;
 }
 
 export default function CanvasRenderer({ graph, snapshot }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
-  useEffect(() => {
-    if (!graph || !canvasRef.current || !containerRef.current) return;
+  const orderedNodes = useMemo(() => computePathPositions(graph), [graph]);
 
+  useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
+    if (!canvas || !container || !graph) return;
+
+    const rect = container.getBoundingClientRect();
+    canvas.width = Math.max(300, rect.width * window.devicePixelRatio);
+    canvas.height = Math.max(300, rect.height * window.devicePixelRatio);
+
     const ctx = canvas.getContext('2d');
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    const dpr = window.devicePixelRatio || 1;
-    const { width, height } = getDisplayMetrics(container);
+    const width = rect.width;
+    const height = rect.height;
 
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
     // background
     ctx.fillStyle = '#020617';
     ctx.fillRect(0, 0, width, height);
 
-    // subtle top guide line
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(24, 40);
-    ctx.lineTo(width - 24, 40);
-    ctx.stroke();
-
     // edges
     ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 3;
-    for (const edge of graph.edges) {
-      const u = getNodeById(graph, edge.u);
-      const v = getNodeById(graph, edge.v);
+    ctx.lineWidth = 4;
+    for (const edge of graph.edges ?? []) {
+      const u = graph.nodes.find((node) => node.id === edge.u);
+      const v = graph.nodes.find((node) => node.id === edge.v);
       if (!u || !v) continue;
 
       ctx.beginPath();
@@ -118,130 +123,122 @@ export default function CanvasRenderer({ graph, snapshot }) {
       ctx.lineTo(v.x, v.y);
       ctx.stroke();
 
-      const mx = (u.x + v.x) / 2;
-      const my = (u.y + v.y) / 2 - 16;
-      drawEdgeLengthLabel(ctx, mx, my, String(edge.length ?? 1));
+      const midX = (u.x + v.x) / 2;
+      const midY = (u.y + v.y) / 2;
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px Inter, Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(edge.length ?? 1), midX, midY - 8);
     }
 
-    // selected facility halos
-    for (const facilityId of snapshot?.selected ?? []) {
-      const node = getNodeById(graph, facilityId);
-      if (!node) continue;
+    const selectedSet = new Set(snapshot?.selected ?? []);
+    const coveredSet = new Set(snapshot?.covered ?? []);
+    const evaluatingId = snapshot?.evaluating ?? null;
+    const currentBest = snapshot?.currentBest ?? null;
 
-      ctx.beginPath();
-      ctx.fillStyle = 'rgba(37, 99, 235, 0.10)';
-      ctx.arc(node.x, node.y, 24, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // interval overlays for feasibility test / parametric search
+    const overlays = snapshot?.overlays ?? {};
+    const intervals = overlays.intervals ?? [];
+    const properIntervals = overlays.properIntervals ?? [];
+    const facilityPositions = overlays.facilityPositions ?? [];
 
-    // trial coverage overlay
-    if (snapshot?.evalCovered?.length > 0) {
-      for (const nodeId of snapshot.evalCovered) {
-        const node = getNodeById(graph, nodeId);
-        if (!node) continue;
+    if (intervals.length > 0) {
+      const yOffsetBase = 60;
+
+      intervals.forEach((interval, idx) => {
+        const leftPoint = interpolatePoint(orderedNodes, interval.left);
+        const rightPoint = interpolatePoint(orderedNodes, interval.right);
+        const centerPoint = interpolatePoint(orderedNodes, interval.center);
+
+        if (!leftPoint || !rightPoint || !centerPoint) return;
+
+        const y = centerPoint.y - yOffsetBase - (idx % 3) * 18;
+
+        ctx.strokeStyle = properIntervals.some((item) => item.id === interval.id)
+          ? 'rgba(56, 189, 248, 0.85)'
+          : 'rgba(148, 163, 184, 0.35)';
+        ctx.lineWidth = 3;
 
         ctx.beginPath();
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.14)';
-        ctx.arc(node.x, node.y, 22, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(leftPoint.x, y);
+        ctx.lineTo(rightPoint.x, y);
+        ctx.stroke();
+
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '10px Inter, Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(interval.id, centerPoint.x, y - 4);
+      });
+    }
+
+    if (facilityPositions.length > 0) {
+      for (const scalar of facilityPositions) {
+        const point = interpolatePoint(orderedNodes, scalar);
+        if (!point) continue;
+
+        ctx.fillStyle = '#f59e0b';
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 2;
+        drawDiamond(ctx, point.x, point.y - 38, 8);
+
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.6)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(point.x, point.y - 28);
+        ctx.lineTo(point.x, point.y - 8);
+        ctx.stroke();
       }
     }
 
-    // confirmed covered overlay
-    if (snapshot?.covered?.length > 0) {
-      for (const nodeId of snapshot.covered) {
-        const node = getNodeById(graph, nodeId);
-        if (!node) continue;
-
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(34, 197, 94, 0.12)';
-        ctx.arc(node.x, node.y, 20, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // assignments
-    if (snapshot?.assignments && Object.keys(snapshot.assignments).length > 0) {
+    // assignment lines for node-based algorithms
+    if (snapshot?.assignments) {
+      ctx.strokeStyle = 'rgba(96, 165, 250, 0.35)';
       ctx.lineWidth = 2;
 
-      for (const [nodeId, assignment] of Object.entries(snapshot.assignments)) {
-        const node = getNodeById(graph, nodeId);
-        const facility = getNodeById(graph, assignment.facility);
+      for (const node of graph.nodes ?? []) {
+        const assignment = snapshot.assignments[node.id];
+        if (!assignment?.facility) continue;
 
-        if (!node || !facility) continue;
-        if (node.id === facility.id) continue;
+        const facilityNode = graph.nodes.find((item) => item.id === assignment.facility);
+        if (!facilityNode) continue;
 
-        ctx.strokeStyle = 'rgba(59, 130, 246, 0.45)';
         ctx.beginPath();
         ctx.moveTo(node.x, node.y);
-        ctx.lineTo(facility.x, facility.y);
-        ctx.stroke();
-      }
-    }
-
-    // trial facilities overlay
-    if (snapshot?.overlays?.trialFacilities?.length > 0) {
-      for (const facilityId of snapshot.overlays.trialFacilities) {
-        const node = getNodeById(graph, facilityId);
-        if (!node) continue;
-
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(147, 197, 253, 0.95)';
-        ctx.lineWidth = 3;
-        ctx.arc(node.x, node.y, 18, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-
-    // local swap hints
-    if (snapshot?.overlays?.swapOut) {
-      const node = getNodeById(graph, snapshot.overlays.swapOut);
-      if (node) {
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.95)';
-        ctx.lineWidth = 3;
-        ctx.arc(node.x, node.y, 23, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-
-    if (snapshot?.overlays?.swapIn) {
-      const node = getNodeById(graph, snapshot.overlays.swapIn);
-      if (node) {
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(34, 197, 94, 0.95)';
-        ctx.lineWidth = 3;
-        ctx.arc(node.x, node.y, 23, 0, Math.PI * 2);
+        ctx.lineTo(facilityNode.x, facilityNode.y);
         ctx.stroke();
       }
     }
 
     // nodes
-    for (const node of graph.nodes) {
-      const {
-        isSelected,
-        isEvaluating,
-        isCovered,
-        isEvalCovered,
-        isCurrentBest,
-      } = getNodeState(snapshot, node.id);
+    for (const node of graph.nodes ?? []) {
+      const isSelected = selectedSet.has(node.id);
+      const isCovered = coveredSet.has(node.id);
+      const isEvaluating = evaluatingId === node.id;
+      const isCurrentBest = currentBest === node.id;
 
-      let fillStyle = '#475569';
-      let strokeStyle = '#0f172a';
+      let fillStyle = '#0f172a';
+      let strokeStyle = '#94a3b8';
       let shape = 'circle';
 
-      if (isCovered) fillStyle = '#22c55e';
-      if (isEvalCovered && !isCovered) fillStyle = '#f59e0b';
-      if (isSelected) {
-        fillStyle = '#2563eb';
-        shape = 'square';
+      if (isCovered) {
+        fillStyle = '#052e16';
+        strokeStyle = '#22c55e';
       }
-      if (isEvaluating) {
-        fillStyle = '#f59e0b';
-        shape = 'diamond';
+
+      if (isSelected) {
+        fillStyle = '#1d4ed8';
+        strokeStyle = '#93c5fd';
+        shape = 'square';
       }
 
       if (isCurrentBest) {
+        fillStyle = '#7c3aed';
+        strokeStyle = '#c4b5fd';
+        shape = 'diamond';
+      }
+
+      if (isEvaluating) {
         ctx.beginPath();
         ctx.fillStyle = 'rgba(250, 204, 21, 0.18)';
         ctx.arc(node.x, node.y, 26, 0, Math.PI * 2);
@@ -260,19 +257,17 @@ export default function CanvasRenderer({ graph, snapshot }) {
         drawCircle(ctx, node.x, node.y, 10);
       }
 
-      // node id
       ctx.fillStyle = '#e2e8f0';
       ctx.font = '12px Inter, Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
       ctx.fillText(String(node.id), node.x, node.y - 16);
 
-      // node weight
       ctx.fillStyle = '#93c5fd';
       ctx.font = '11px Inter, Arial, sans-serif';
       ctx.fillText(`w=${node.weight ?? 1}`, node.x, node.y + 26);
     }
-  }, [graph, snapshot]);
+  }, [graph, snapshot, orderedNodes]);
 
   return (
     <div

@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { MODELS, MODEL_INFO } from './config/models';
-import {
-  ALGORITHMS,
-  getImplementedAlgorithmOptions,
-} from './config/algorithms';
+import { ALGORITHMS, getImplementedAlgorithmOptions } from './config/algorithms';
 
 import { EXAMPLE_GRAPHS } from './data/exampleGraphs';
 import { generateRandomPathGraph } from './graph/generators/randomPath';
@@ -13,16 +10,12 @@ import CanvasRenderer from './render/canvasRenderer.jsx';
 
 function formatAlgorithmLabel(algorithmId) {
   switch (algorithmId) {
-    case ALGORITHMS.GREEDY_ADDITION:
-      return 'Greedy Addition';
-    case ALGORITHMS.LOCAL_SWAP:
-      return 'Local Swap';
-    case ALGORITHMS.FARTHEST_FIRST:
-      return 'Farthest First';
-    case ALGORITHMS.GREEDY_COVER:
-      return 'Greedy Cover';
     case ALGORITHMS.EXACT_BRUTEFORCE:
       return 'Exact (Small Only)';
+    case ALGORITHMS.FEASIBILITY_TEST:
+      return 'λ-Feasibility Test';
+    case ALGORITHMS.PARAMETRIC_SEARCH:
+      return 'Parametric Search';
     default:
       return algorithmId;
   }
@@ -31,19 +24,16 @@ function formatAlgorithmLabel(algorithmId) {
 function getRoundLabel(snapshot, model) {
   if (!snapshot) return '-';
 
-  if (model === MODELS.SETCOVER) {
-    if (snapshot.metrics?.lambdaValue != null) {
-      return `λ = ${snapshot.metrics.lambdaValue}`;
-    }
-    return snapshot.metrics?.round ?? '-';
-  }
-
   if (snapshot.metrics?.iteration != null) {
     return `iteration ${snapshot.metrics.iteration}`;
   }
 
   if (snapshot.metrics?.round != null) {
     return `round ${snapshot.metrics.round}`;
+  }
+
+  if (model === MODELS.PCENTER && snapshot.metrics?.lambdaValue != null) {
+    return `λ = ${snapshot.metrics.lambdaValue}`;
   }
 
   if (snapshot.metrics?.p != null) {
@@ -64,6 +54,20 @@ function getPrimaryMetric(snapshot, model) {
   }
 
   if (model === MODELS.PCENTER) {
+    if (snapshot.metrics?.optimalLambda != null) {
+      return {
+        label: 'Optimal λ',
+        value: snapshot.metrics?.optimalLambda,
+      };
+    }
+
+    if (snapshot.metrics?.lambdaValue != null) {
+      return {
+        label: 'λ',
+        value: snapshot.metrics?.lambdaValue,
+      };
+    }
+
     return {
       label: 'Max Cost',
       value: snapshot.metrics?.maxCost,
@@ -72,22 +76,27 @@ function getPrimaryMetric(snapshot, model) {
 
   if (model === MODELS.SETCOVER) {
     return {
-      label: 'Max Cost',
-      value: snapshot.metrics?.maxCost,
+      label: 'Facility Count',
+      value: snapshot.metrics?.facilityCount,
     };
   }
 
   return null;
 }
 
+function formatMetricValue(value) {
+  if (value == null) return '-';
+  if (!Number.isFinite(value)) return '∞';
+  if (Math.abs(value - Math.round(value)) < 1e-9) return String(Math.round(value));
+  return value.toFixed(2);
+}
+
 export default function App() {
-  const [model, setModel] = useState(MODELS.PMEDIAN);
-  const [algorithm, setAlgorithm] = useState(ALGORITHMS.GREEDY_ADDITION);
+  const [model, setModel] = useState(MODELS.PCENTER);
+  const [algorithm, setAlgorithm] = useState(ALGORITHMS.FEASIBILITY_TEST);
 
   const [graph, setGraph] = useState(() => EXAMPLE_GRAPHS[0] ?? generateRandomPathGraph());
-  const [graphSource, setGraphSource] = useState(
-    EXAMPLE_GRAPHS[0]?.name ?? 'Random Path'
-  );
+  const [graphSource, setGraphSource] = useState(EXAMPLE_GRAPHS[0]?.name ?? 'Random Path');
 
   const [p, setP] = useState(2);
   const [lambdaValue, setLambdaValue] = useState(30);
@@ -198,7 +207,8 @@ export default function App() {
         <div style={headerStyle}>
           <h1 style={titleStyle}>Facility Location Visualizer</h1>
           <p style={subtitleStyle}>
-            Explore facility location models with example graphs and animated snapshots.
+            Course-focused visualization for p-median, p-center, covering, and p-center
+            parametric search on path graphs.
           </p>
         </div>
 
@@ -212,7 +222,7 @@ export default function App() {
             >
               <option value={MODELS.PMEDIAN}>p-Median</option>
               <option value={MODELS.PCENTER}>p-Center</option>
-              <option value={MODELS.SETCOVER}>Cost Covering</option>
+              <option value={MODELS.SETCOVER}>Covering</option>
             </select>
           </div>
 
@@ -223,9 +233,9 @@ export default function App() {
               onChange={(event) => setAlgorithm(event.target.value)}
               style={inputStyle}
             >
-              {currentAlgorithmOptions.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
+              {currentAlgorithmOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {formatAlgorithmLabel(option.id)}
                 </option>
               ))}
             </select>
@@ -243,258 +253,151 @@ export default function App() {
             </select>
           </div>
 
-          {model === MODELS.SETCOVER ? (
-            <div style={panelStyle}>
-              <div style={labelStyle}>λ (Cost Threshold)</div>
-              <input
-                type="number"
-                min="0"
-                value={lambdaValue}
-                onChange={(event) => setLambdaValue(Number(event.target.value))}
-                style={inputStyle}
-              />
-            </div>
-          ) : (
-            <div style={panelStyle}>
-              <div style={labelStyle}>p Value</div>
-              <input
-                type="number"
-                min="1"
-                max={Math.max(1, graph?.nodes?.length ?? 1)}
-                value={p}
-                onChange={(event) => setP(Number(event.target.value))}
-                style={inputStyle}
-              />
-            </div>
-          )}
-
           <div style={panelStyle}>
-            <div style={labelStyle}>Action</div>
-            <button style={primaryButtonStyle} onClick={handleGenerateRandomPath}>
+            <div style={labelStyle}>Random</div>
+            <button onClick={handleGenerateRandomPath} style={buttonStyle}>
               Generate Random Path
             </button>
           </div>
-        </div>
 
-        <div style={panelStyle}>
-          <h2 style={sectionTitleStyle}>Visualization</h2>
-
-          <div style={metaGridStyle}>
-            <div>
-              <div style={metaLineStyle}>
-                <strong>Graph:</strong> <span>{graph?.name ?? '-'}</span>
-              </div>
-              <div style={metaLineStyle}>
-                <strong>Type:</strong> <span>{graph?.type ?? '-'}</span>
-              </div>
-              <div style={metaLineStyle}>
-                <strong>Description:</strong> <span>{graph?.description ?? '-'}</span>
-              </div>
-            </div>
-
-            <div>
-              <div style={metaLineStyle}>
-                <strong>Algorithm:</strong> <span>{formatAlgorithmLabel(algorithm)}</span>
-              </div>
-              <div style={metaLineStyle}>
-                <strong>Step:</strong>{' '}
-                <span>
-                  {snapshots.length === 0 ? '0 / 0' : `${currentStepIndex + 1} / ${snapshots.length}`}
-                </span>
-              </div>
-            </div>
+          <div style={panelStyle}>
+            <div style={labelStyle}>p</div>
+            <input
+              type="number"
+              min={1}
+              max={graph?.nodes?.length ?? 1}
+              value={p}
+              onChange={(event) => setP(Math.max(1, Number(event.target.value) || 1))}
+              style={inputStyle}
+            />
           </div>
 
-          <CanvasRenderer graph={graph} snapshot={currentSnapshot} />
+          <div style={panelStyle}>
+            <div style={labelStyle}>λ</div>
+            <input
+              type="number"
+              min={0}
+              value={lambdaValue}
+              onChange={(event) =>
+                setLambdaValue(Math.max(0, Number(event.target.value) || 0))
+              }
+              style={inputStyle}
+            />
+          </div>
 
-          <div style={legendStyle}>
-            <span style={legendItemStyle}>
-              <span style={{ ...legendDotStyle, background: '#2563eb' }} />
-              Selected facility
-            </span>
-            <span style={legendItemStyle}>
-              <span
-                style={{
-                  ...legendDotStyle,
-                  background: '#f59e0b',
-                  transform: 'rotate(45deg)',
-                  borderRadius: '2px',
-                }}
-              />
-              Evaluating node
-            </span>
-            <span style={legendItemStyle}>
-              <span style={{ ...legendDotStyle, background: '#22c55e' }} />
-              Feasible / covered node
-            </span>
-            <span style={legendItemStyle}>
-              <span
-                style={{
-                  ...legendDotStyle,
-                  background: '#475569',
-                  border: '1px solid #94a3b8',
-                }}
-              />
-              Ordinary node
-            </span>
-            <span style={legendItemStyle}>
-              <span
-                style={{
-                  ...legendDotStyle,
-                  background: 'transparent',
-                  border: '2px solid #facc15',
-                }}
-              />
-              Current best halo
-            </span>
+          <div style={panelStyle}>
+            <div style={labelStyle}>Speed (ms)</div>
+            <input
+              type="number"
+              min={100}
+              step={100}
+              value={playbackSpeed}
+              onChange={(event) =>
+                setPlaybackSpeed(Math.max(100, Number(event.target.value) || 700))
+              }
+              style={inputStyle}
+            />
           </div>
         </div>
 
-        <div style={bottomGridStyle}>
-          <div style={panelStyle}>
-            <h2 style={sectionTitleStyle}>Simulation State</h2>
+        <div style={mainGridStyle}>
+          <div style={leftColumnStyle}>
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Visualization</div>
+              <CanvasRenderer graph={graph} snapshot={currentSnapshot} />
+            </div>
 
-            <div style={statsGridStyle}>
-              <div style={statBoxStyle}>
-                <div style={statLabelStyle}>Model</div>
-                <div style={statValueStyle}>{modelInfo?.name ?? '-'}</div>
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Playback</div>
+              <div style={buttonRowStyle}>
+                <button onClick={handlePrev} style={buttonStyle}>
+                  Prev
+                </button>
+                <button
+                  onClick={() => setIsPlaying((prev) => !prev)}
+                  style={buttonStyle}
+                >
+                  {isPlaying ? 'Pause' : 'Play'}
+                </button>
+                <button onClick={handleNext} style={buttonStyle}>
+                  Next
+                </button>
+                <button onClick={handleReset} style={buttonStyle}>
+                  Reset
+                </button>
               </div>
 
-              <div style={statBoxStyle}>
-                <div style={statLabelStyle}>Round / Param</div>
-                <div style={statValueStyle}>{getRoundLabel(currentSnapshot, model)}</div>
-              </div>
-            </div>
-
-            <div style={metaLineStyle}>
-              <strong>Objective:</strong> <span>{modelInfo?.description ?? '-'}</span>
-            </div>
-            <div style={metaLineStyle}>
-              <strong>Step Type:</strong> <span>{currentSnapshot?.type ?? '-'}</span>
-            </div>
-            <div style={metaLineStyle}>
-              <strong>Phase:</strong> <span>{currentSnapshot?.phase ?? '-'}</span>
-            </div>
-
-            {primaryMetric?.value != null && (
-              <div style={metaLineStyle}>
-                <strong>{primaryMetric.label}:</strong>{' '}
-                <span>{Number.isFinite(primaryMetric.value) ? primaryMetric.value : '∞'}</span>
-              </div>
-            )}
-
-            {currentSnapshot?.metrics?.facilityCount != null && (
-              <div style={metaLineStyle}>
-                <strong>Facility Count:</strong> <span>{currentSnapshot.metrics.facilityCount}</span>
-              </div>
-            )}
-
-            {currentSnapshot?.metrics?.coveredCount != null && (
-              <div style={metaLineStyle}>
-                <strong>Feasible Nodes:</strong>{' '}
-                <span>
-                  {currentSnapshot.metrics.coveredCount}/{currentSnapshot.metrics.total ?? 0}
-                </span>
-              </div>
-            )}
-
-            {currentSnapshot?.metrics?.lambdaValue != null && (
-              <div style={metaLineStyle}>
-                <strong>λ Threshold:</strong> <span>{currentSnapshot.metrics.lambdaValue}</span>
-              </div>
-            )}
-
-            <div style={{ marginTop: '18px' }}>
-              <input
-                type="range"
-                min="0"
-                max={Math.max(0, snapshots.length - 1)}
-                value={currentStepIndex}
-                onChange={(event) => {
-                  setIsPlaying(false);
-                  setCurrentStepIndex(Number(event.target.value));
-                }}
-                style={rangeStyle}
-              />
-            </div>
-
-            <div style={buttonRowStyle}>
-              <button style={buttonStyle} onClick={handleReset}>
-                Reset
-              </button>
-              <button style={buttonStyle} onClick={handlePrev}>
-                Prev
-              </button>
-              <button
-                style={primaryInlineButtonStyle}
-                onClick={() => setIsPlaying((prev) => !prev)}
-              >
-                {isPlaying ? 'Pause' : 'Play'}
-              </button>
-              <button style={buttonStyle} onClick={handleNext}>
-                Next
-              </button>
-            </div>
-
-            <div style={{ marginTop: '14px' }}>
-              <div style={labelStyle}>Playback Speed: {playbackSpeed} ms</div>
-              <input
-                type="range"
-                min="200"
-                max="2000"
-                step="100"
-                value={playbackSpeed}
-                onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
-                style={rangeStyle}
-              />
-            </div>
-          </div>
-
-          <div style={panelStyle}>
-            <h2 style={sectionTitleStyle}>Explanation</h2>
-            <div style={textCardStyle}>
-              <div style={multilineTextStyle}>
-                {currentSnapshot?.explanation || 'No explanation available for this step.'}
+              <div style={metaRowStyle}>
+                <div>
+                  <strong>Step:</strong> {snapshots.length === 0 ? 0 : currentStepIndex + 1} /{' '}
+                  {snapshots.length}
+                </div>
+                <div>
+                  <strong>Phase:</strong> {currentSnapshot?.phase ?? '-'}
+                </div>
+                <div>
+                  <strong>Round:</strong> {getRoundLabel(currentSnapshot, model)}
+                </div>
               </div>
             </div>
           </div>
 
-          <div style={panelStyle}>
-            <h2 style={sectionTitleStyle}>Top Scoreboard</h2>
-            <div style={textCardStyle}>
+          <div style={rightColumnStyle}>
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Model Summary</div>
+              <div style={infoLineStyle}>
+                <strong>{modelInfo?.name}</strong>
+              </div>
+              <div style={infoMutedStyle}>{modelInfo?.description}</div>
+              <div style={infoMutedStyle}>Graph: {graph?.name ?? '-'}</div>
+              <div style={infoMutedStyle}>Algorithm: {formatAlgorithmLabel(algorithm)}</div>
+            </div>
+
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Current Metric</div>
+              <div style={metricValueStyle}>
+                {primaryMetric ? (
+                  <>
+                    <span>{primaryMetric.label}: </span>
+                    <strong>{formatMetricValue(primaryMetric.value)}</strong>
+                  </>
+                ) : (
+                  '-'
+                )}
+              </div>
+            </div>
+
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Explanation</div>
+              <pre style={explanationStyle}>
+                {currentSnapshot?.explanation ?? 'No explanation available.'}
+              </pre>
+            </div>
+
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Scoreboard Preview</div>
               {scorePreview.length === 0 ? (
-                <div style={emptyStyle}>No scoreboard data on this step.</div>
+                <div style={infoMutedStyle}>No scoreboard for this step.</div>
               ) : (
-                <div style={scoreboardListStyle}>
+                <div style={scoreListStyle}>
                   {scorePreview.map((item) => (
                     <div key={item.id} style={scoreRowStyle}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span
-                          style={{
-                            width: '10px',
-                            height: '10px',
-                            borderRadius: '999px',
-                            background: item.isBest ? '#facc15' : '#334155',
-                            flexShrink: 0,
-                          }}
-                        />
-                        <span style={{ color: '#e2e8f0' }}>{item.id}</span>
-                      </div>
-                      <span style={{ color: item.isBest ? '#fde68a' : '#93c5fd' }}>
-                        {Number.isFinite(item.score) ? item.score : '∞'}
+                      <span>{item.id}</span>
+                      <span>
+                        {formatMetricValue(item.score)} {item.isBest ? '★' : ''}
                       </span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </div>
 
-          <div style={panelStyle}>
-            <h2 style={sectionTitleStyle}>Current Snapshot JSON</h2>
-            <pre style={jsonStyle}>
-              {JSON.stringify(currentSnapshot ?? {}, null, 2)}
-            </pre>
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Snapshot JSON</div>
+              <pre style={jsonStyle}>
+                {JSON.stringify(currentSnapshot, null, 2)}
+              </pre>
+            </div>
           </div>
         </div>
       </div>
@@ -504,230 +407,148 @@ export default function App() {
 
 const pageStyle = {
   minHeight: '100vh',
-  background: 'linear-gradient(180deg, #020617 0%, #071127 100%)',
+  background: '#020617',
   color: '#e2e8f0',
-  fontFamily:
-    'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  padding: '24px',
+  fontFamily: 'Inter, Arial, sans-serif',
 };
 
 const shellStyle = {
   maxWidth: '1500px',
   margin: '0 auto',
-  padding: '28px 20px 48px',
 };
 
 const headerStyle = {
-  marginBottom: '22px',
+  marginBottom: '20px',
 };
 
 const titleStyle = {
   margin: 0,
   fontSize: '32px',
-  fontWeight: 800,
-  color: '#f8fafc',
 };
 
 const subtitleStyle = {
-  marginTop: '10px',
-  marginBottom: 0,
+  marginTop: '8px',
   color: '#94a3b8',
-  fontSize: '15px',
-};
-
-const panelStyle = {
-  background: 'rgba(15, 23, 42, 0.92)',
-  border: '1px solid #1e293b',
-  borderRadius: '16px',
-  padding: '18px',
-  boxShadow: '0 8px 30px rgba(0, 0, 0, 0.18)',
-  minWidth: 0,
 };
 
 const controlsGridStyle = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-  gap: '14px',
-  marginBottom: '18px',
-  alignItems: 'end',
-};
-
-const bottomGridStyle = {
-  display: 'grid',
-  gridTemplateColumns: '1fr',
-  gap: '18px',
-  marginTop: '18px',
-};
-
-const sectionTitleStyle = {
-  marginTop: 0,
-  marginBottom: '18px',
-  fontSize: '20px',
-  color: '#f8fafc',
-};
-
-const metaGridStyle = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-  gap: '12px 24px',
+  gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+  gap: '12px',
   marginBottom: '16px',
 };
 
-const metaLineStyle = {
-  marginBottom: '10px',
-  color: '#cbd5e1',
-  lineHeight: 1.5,
-};
-
-const labelStyle = {
-  color: '#94a3b8',
-  fontSize: '12px',
-  marginBottom: '8px',
-  fontWeight: 600,
-};
-
-const inputStyle = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '11px 12px',
-  borderRadius: '10px',
-  border: '1px solid #334155',
-  background: '#020617',
-  color: '#f8fafc',
-  fontSize: '15px',
-  outline: 'none',
-};
-
-const buttonStyle = {
-  padding: '10px 14px',
-  borderRadius: '10px',
-  border: '1px solid #334155',
-  background: '#020617',
-  color: '#e2e8f0',
-  cursor: 'pointer',
-  fontWeight: 600,
-};
-
-const primaryButtonStyle = {
-  width: '100%',
-  padding: '11px 14px',
-  borderRadius: '10px',
-  border: 'none',
-  background: '#2563eb',
-  color: 'white',
-  cursor: 'pointer',
-  fontWeight: 700,
-};
-
-const primaryInlineButtonStyle = {
-  ...buttonStyle,
-  background: '#2563eb',
-  border: 'none',
-  color: 'white',
-};
-
-const statsGridStyle = {
+const mainGridStyle = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-  gap: '12px',
-  marginBottom: '18px',
+  gridTemplateColumns: '1.5fr 1fr',
+  gap: '16px',
 };
 
-const statBoxStyle = {
-  background: '#020617',
+const leftColumnStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '16px',
+};
+
+const rightColumnStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '16px',
+};
+
+const panelStyle = {
+  background: '#0f172a',
   border: '1px solid #1e293b',
   borderRadius: '12px',
   padding: '14px',
 };
 
-const statLabelStyle = {
-  color: '#94a3b8',
+const sectionTitleStyle = {
+  fontWeight: 700,
+  marginBottom: '10px',
+};
+
+const labelStyle = {
   fontSize: '12px',
+  color: '#94a3b8',
   marginBottom: '6px',
 };
 
-const statValueStyle = {
-  fontSize: '16px',
-  fontWeight: 700,
-  color: '#f8fafc',
+const inputStyle = {
+  width: '100%',
+  background: '#020617',
+  color: '#e2e8f0',
+  border: '1px solid #334155',
+  borderRadius: '8px',
+  padding: '10px',
+};
+
+const buttonStyle = {
+  background: '#1d4ed8',
+  color: 'white',
+  border: 'none',
+  borderRadius: '8px',
+  padding: '10px 12px',
+  cursor: 'pointer',
 };
 
 const buttonRowStyle = {
   display: 'flex',
+  gap: '10px',
   flexWrap: 'wrap',
-  gap: '10px',
-  marginTop: '16px',
 };
 
-const rangeStyle = {
-  width: '100%',
-  cursor: 'pointer',
-};
-
-const textCardStyle = {
-  background: '#020617',
-  border: '1px solid #1e293b',
-  borderRadius: '12px',
-  padding: '16px',
-};
-
-const multilineTextStyle = {
-  whiteSpace: 'pre-line',
-  color: '#e2e8f0',
-  lineHeight: 1.7,
-};
-
-const emptyStyle = {
-  color: '#64748b',
-};
-
-const scoreboardListStyle = {
-  display: 'grid',
-  gap: '10px',
-};
-
-const scoreRowStyle = {
+const metaRowStyle = {
   display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '12px',
-  padding: '10px 12px',
-  borderRadius: '10px',
-  background: '#0b1220',
-  border: '1px solid #1e293b',
+  gap: '16px',
+  marginTop: '12px',
+  flexWrap: 'wrap',
+  color: '#cbd5e1',
+};
+
+const explanationStyle = {
+  margin: 0,
+  whiteSpace: 'pre-wrap',
+  lineHeight: 1.5,
+  color: '#e2e8f0',
+  fontFamily: 'inherit',
 };
 
 const jsonStyle = {
   margin: 0,
-  padding: '16px',
-  borderRadius: '12px',
+  maxHeight: '320px',
+  overflow: 'auto',
   background: '#020617',
-  border: '1px solid #1e293b',
-  color: '#cbd5e1',
-  overflowX: 'auto',
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-word',
+  padding: '12px',
+  borderRadius: '8px',
   fontSize: '12px',
-  lineHeight: 1.5,
 };
 
-const legendStyle = {
+const infoLineStyle = {
+  marginBottom: '8px',
+};
+
+const infoMutedStyle = {
+  color: '#94a3b8',
+  marginBottom: '6px',
+};
+
+const metricValueStyle = {
+  fontSize: '20px',
+};
+
+const scoreListStyle = {
   display: 'flex',
-  flexWrap: 'wrap',
-  gap: '16px',
-  marginTop: '16px',
-  color: '#cbd5e1',
-  fontSize: '14px',
-};
-
-const legendItemStyle = {
-  display: 'inline-flex',
-  alignItems: 'center',
+  flexDirection: 'column',
   gap: '8px',
 };
 
-const legendDotStyle = {
-  width: '14px',
-  height: '14px',
-  borderRadius: '999px',
-  display: 'inline-block',
+const scoreRowStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: '12px',
+  padding: '8px 10px',
+  background: '#020617',
+  borderRadius: '8px',
 };

@@ -1,55 +1,46 @@
-export function applyPathLayout(nodes, edges) {
-  const totalNodes = nodes.length;
+export function applyPathLayout(
+  nodes,
+  edges,
+  options = {}
+) {
+  const {
+    startX = 100,
+    startY = 260,
+    minSpacing = 90,
+    spacingScale = 18,
+  } = options;
 
-  if (totalNodes === 0) {
-    return {
-      nodes: [],
-      edges,
-    };
+  const edgeMap = new Map();
+  for (const edge of edges ?? []) {
+    edgeMap.set(`${edge.u}::${edge.v}`, edge.length ?? 1);
+    edgeMap.set(`${edge.v}::${edge.u}`, edge.length ?? 1);
   }
 
-  const nodesPerRow = 4;
-  const leftX = 110;
-  const rightX = 1130;
-  const rowGap = 150;
-  const topY = 120;
+  const ordered = [...(nodes ?? [])].sort((a, b) =>
+    String(a.id).localeCompare(String(b.id))
+  );
 
-  const rowCount = Math.ceil(totalNodes / nodesPerRow);
+  const laidOutNodes = [];
+  let x = startX;
 
-  const laidOutNodes = nodes.map((node, index) => {
-    const rowIndex = Math.floor(index / nodesPerRow);
-    const indexInRow = index % nodesPerRow;
+  for (let i = 0; i < ordered.length; i++) {
+    const node = ordered[i];
 
-    const rowStart = rowIndex * nodesPerRow;
-    const rowEnd = Math.min(rowStart + nodesPerRow, totalNodes);
-    const rowNodeCount = rowEnd - rowStart;
-
-    const usableWidth = rightX - leftX;
-    const horizontalGap =
-      rowNodeCount <= 1 ? 0 : usableWidth / (rowNodeCount - 1);
-
-    const isLeftToRight = rowIndex % 2 === 0;
-
-    let x;
-    if (rowNodeCount === 1) {
-      x = (leftX + rightX) / 2;
-    } else if (isLeftToRight) {
-      x = leftX + indexInRow * horizontalGap;
-    } else {
-      x = rightX - indexInRow * horizontalGap;
+    if (i > 0) {
+      const prev = ordered[i - 1];
+      const edgeLength = edgeMap.get(`${prev.id}::${node.id}`) ?? 1;
+      x += Math.max(minSpacing, edgeLength * spacingScale);
     }
 
-    const y = topY + rowIndex * rowGap;
-
-    return {
+    laidOutNodes.push({
       ...node,
       x,
-      y,
-    };
-  });
+      y: startY,
+    });
+  }
 
   return {
     nodes: laidOutNodes,
-    edges,
+    edges: [...(edges ?? [])],
   };
 }

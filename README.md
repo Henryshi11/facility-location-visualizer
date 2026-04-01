@@ -1,133 +1,182 @@
 # Facility Location Visualizer
 
-A personal project for practicing and reviewing facility location algorithms, built as a final project for my course.
+A course-focused visualizer for reviewing and practicing core facility location ideas from class.
 
-This tool focuses on visualizing how different algorithms behave on graphs, making it easier to understand their differences through step-by-step execution.
+This project was built as a final project for a facility location course.  
+Its main goal is not to include as many heuristics as possible, but to help me **understand, review, and visually trace the algorithms and models emphasized in the lecture notes**.
 
 ---
 
-## Overview
+## Project Goal
 
-This project is designed as a hands-on way to revisit and reinforce concepts from facility location theory.
+Instead of treating facility location only as formulas or pseudocode, this project turns the main ideas into a step-by-step visual tool.
 
-Instead of only working with formulas or pseudocode, the goal is to:
+The project focuses on:
 
-- see how algorithms evolve step by step
-- compare different strategies visually
-- understand why certain methods succeed or fail
+- understanding the difference between **p-median**, **p-center**, and **covering**
+- visualizing how a solution evolves over time
+- reviewing the relationship between **model definition**, **objective function**, and **algorithm behavior**
+- emphasizing the course material, especially **p-center feasibility testing** and **parametric search on path networks**
 
-The visual interface makes it easier to build intuition about algorithm behavior.
+---
+
+## Course Alignment
+
+The lecture notes describe three main facility location models:
+
+- **p-Median**: minimize the total weighted assignment cost
+- **p-Center**: minimize the maximum weighted assignment cost
+- **Covering**: given a threshold λ, minimize the number of facilities needed to cover all demand points
+
+For the p-center problem on paths, the notes also emphasize:
+
+- the **λ-feasibility test**
+- **parametric search**
+- path-based reasoning using weighted intervals
+
+This project follows that structure.
 
 ---
 
 ## Supported Models
 
-### p-Median
+### 1. p-Median
 
-Given a fixed number of facilities \( p \), minimize the **total weighted assignment cost**:
-
-\[
-\min_{|S|=p} \sum_i w_i d(i,S)
-\]
-
-This is the classical p-median formulation.
-
----
-
-### p-Center
-
-Given a fixed number of facilities \( p \), minimize the **worst weighted assignment cost**:
+Given a fixed number of facilities `p`, choose `p` locations to minimize the total weighted service cost:
 
 \[
-\min_{|S|=p} \max_i w_i d(i,S)
+\min_{|F| = p} \sum_i w_i d(i, F)
 \]
 
-This is different from p-median: the goal is not to minimize the total, but to minimize the worst case.
+This is the **minisum** version of facility location.
 
----
+### 2. p-Center
 
-### Cost Covering
-
-Given a cost threshold \( \lambda \), find the **minimum number of facilities** such that every node satisfies
+Given a fixed number of facilities `p`, choose `p` locations to minimize the worst weighted service cost:
 
 \[
-w_i d(i,S) \le \lambda
+\min_{|F| = p} \max_i w_i d(i, F)
 \]
 
-Equivalently:
+This is the **minimax** version of facility location.
+
+### 3. Covering
+
+Given a service threshold `λ`, open as few facilities as possible so that every demand point is covered:
 
 \[
-\min |S| \quad \text{s.t. } w_i d(i,S) \le \lambda,\ \forall i
+\forall i,\; w_i d(i, F) \le \lambda
 \]
 
-This is the cost-threshold version of covering used in this project.
+The objective is:
+
+\[
+\min |F|
+\]
 
 ---
 
 ## Implemented Algorithms
 
 ### p-Median
-
-- Greedy Addition
-- Exact Brute Force
-- Local Swap
+- **Exact Brute Force**
+  - Used as a small-instance baseline
+  - Tries every facility subset of size `p`
 
 ### p-Center
+- **λ-Feasibility Test**
+  - Builds coverage intervals on a path
+  - Places facilities greedily at interval right endpoints
+  - Checks whether the current λ can be satisfied with at most `p` facilities
 
-- Greedy Addition
-- Farthest First
-- Exact Brute Force
+- **Parametric Search**
+  - Generates candidate λ values from pairs of weighted vertices
+  - Uses repeated feasibility tests to find the smallest feasible λ
 
-### Cost Covering
+- **Exact Brute Force**
+  - Included as a small-instance baseline for comparison
 
-- Greedy Cover
-- Exact Brute Force
+### Covering
+- **Exact Brute Force**
+  - Used as a baseline for small examples
 
----
 
-## Features
+## Visualization Design
 
-- step-by-step algorithm simulation
-- interactive graph visualization (Canvas-based)
-- snapshot playback (play / pause / step)
-- random graph generation (path graphs)
-- example graph selection
-- scoreboard and explanation panel
-- JSON view for debugging and inspection
-- S-shaped layout for long path graphs
+The visualizer shows:
 
----
+- graph nodes and edge lengths
+- node weights
+- selected facilities
+- assignments from customers to facilities
+- interval coverage structure for feasibility testing
+- step-by-step explanations
+- metric changes such as total cost, max cost, λ, or facility count
 
-## Distance Model
-
-Distances are computed using **graph shortest paths**, not geometric (straight-line) distance.
-
-This means:
-
-- nodes are connected through edges
-- distances follow the graph structure
-- visual layout does not affect actual distance calculations
+For the p-center feasibility test and parametric search views, the intervals \( I_i(\lambda) \) are displayed above the path, and facility placements are shown directly on the path.
 
 ---
 
-## Key Idea
+## Why Path Graphs Are Used
 
-Different models optimize different objectives:
+The lecture notes on parametric search describe the weighted p-center problem on a **path network / real line**, where each demand point induces an interval for a given λ.
 
-- p-median minimizes the total weighted cost
-- p-center minimizes the worst weighted cost
-- cost covering fixes a threshold and minimizes the number of facilities
-
-This project makes those differences visible through animation and side-by-side reasoning.
+Because of that, this project emphasizes **path-style examples** so the course algorithms can be visualized clearly and faithfully.
 
 ---
 
-## Educational Purpose
+## Current Scope
 
-This project serves as:
+This project currently focuses on:
 
-- a visual learning tool for facility location algorithms
-- a review project for course topics
-- a final project for understanding the differences between classical models
-- a way to build intuition about greedy vs exact methods
+- small graph examples
+- visual understanding
+- path-based p-center ideas
+- baseline exact search for comparison
 
+---
+
+## Possible Future Extensions
+
+Future extensions could include:
+
+- node search for the 1-center on trees
+- centroid-based pruning ideas
+- prune-and-search demonstrations
+- integer programming formulations
+- larger input import / export
+
+These are intentionally left outside the current version so the project remains tightly aligned with the course material.
+
+---
+
+## Tech Stack
+
+- React
+- Vite
+- HTML Canvas
+
+---
+
+## Running the Project
+
+Install dependencies:
+
+```bash
+npm install
+
+Start development server:
+
+```bash
+npm run dev
+
+
+Build for production:
+
+```bash
+npm run build
+
+Preview production build:
+
+```bash
+npm run preview

@@ -1,31 +1,25 @@
 import { ALGORITHMS } from '../../config/algorithms';
 
-import { generatePMedianGreedySteps } from '../../algorithms/pmedian/greedyAddition';
 import { generatePMedianExactBruteforceSteps } from '../../algorithms/pmedian/exactBruteforce';
-import { generatePMedianLocalSwapSteps } from '../../algorithms/pmedian/localSwap';
 
-import { generatePCenterGreedySteps } from '../../algorithms/pcenter/greedyAddition';
-import { generatePCenterFarthestFirstSteps } from '../../algorithms/pcenter/farthestFirst';
 import { generatePCenterExactBruteforceSteps } from '../../algorithms/pcenter/exactBruteforce';
+import { generatePCenterFeasibilityTestSteps } from '../../algorithms/pcenter/feasibilityTest';
+import { generatePCenterParametricSearchSteps } from '../../algorithms/pcenter/parametricSearch';
 
-import { generateSetCoverGreedySteps } from '../../algorithms/setcover/greedyCover';
 import { generateSetCoverExactBruteforceSteps } from '../../algorithms/setcover/exactBruteforce';
 
 const SNAPSHOT_BUILDERS = {
   pmedian: {
-    [ALGORITHMS.GREEDY_ADDITION]: generatePMedianGreedySteps,
     [ALGORITHMS.EXACT_BRUTEFORCE]: generatePMedianExactBruteforceSteps,
-    [ALGORITHMS.LOCAL_SWAP]: generatePMedianLocalSwapSteps,
   },
 
   pcenter: {
-    [ALGORITHMS.GREEDY_ADDITION]: generatePCenterGreedySteps,
-    [ALGORITHMS.FARTHEST_FIRST]: generatePCenterFarthestFirstSteps,
+    [ALGORITHMS.FEASIBILITY_TEST]: generatePCenterFeasibilityTestSteps,
+    [ALGORITHMS.PARAMETRIC_SEARCH]: generatePCenterParametricSearchSteps,
     [ALGORITHMS.EXACT_BRUTEFORCE]: generatePCenterExactBruteforceSteps,
   },
 
   setcover: {
-    [ALGORITHMS.GREEDY_COVER]: generateSetCoverGreedySteps,
     [ALGORITHMS.EXACT_BRUTEFORCE]: generateSetCoverExactBruteforceSteps,
   },
 };

@@ -1,9 +1,9 @@
 export const STEP_TYPES = {
-  INIT: 'INIT',
-  ROUND_START: 'ROUND_START',
-  EVALUATE: 'EVALUATE',
-  SELECT: 'SELECT',
-  UPDATE_BEST: 'UPDATE_BEST',
-  NO_PROGRESS: 'NO_PROGRESS',
-  FINISH: 'FINISH',
+  INIT: 'init',
+  ROUND_START: 'round_start',
+  EVALUATE: 'evaluate',
+  SELECT: 'select',
+  UPDATE_BEST: 'update_best',
+  NO_PROGRESS: 'no_progress',
+  FINISH: 'finish',
 };
