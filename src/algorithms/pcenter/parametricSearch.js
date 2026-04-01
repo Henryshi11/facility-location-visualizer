@@ -1,55 +1,19 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
+import { getDistance } from '../shared/distance';
 import { runPCenterFeasibilityTest } from './feasibilityTest';
 
-function getOrderedPathData(graph) {
-  const { nodes, edges } = graph;
-  const orderedNodes = [...nodes].sort((a, b) =>
-    String(a.id).localeCompare(String(b.id))
-  );
-
-  const edgeLengthMap = new Map();
-  for (const edge of edges) {
-    const key1 = `${edge.u}::${edge.v}`;
-    const key2 = `${edge.v}::${edge.u}`;
-    edgeLengthMap.set(key1, edge.length ?? 1);
-    edgeLengthMap.set(key2, edge.length ?? 1);
-  }
-
-  let cumulative = 0;
-  const nodePositions = orderedNodes.map((node, index) => {
-    if (index > 0) {
-      const prev = orderedNodes[index - 1];
-      cumulative += edgeLengthMap.get(`${prev.id}::${node.id}`) ?? 1;
-    }
-
-    return {
-      ...node,
-      pathPosition: cumulative,
-    };
-  });
-
-  return {
-    orderedNodes: nodePositions,
-    totalLength: cumulative,
-  };
-}
-
-function generateCandidateValues(graph) {
-  const { orderedNodes } = getOrderedPathData(graph);
+function generateDiscreteCandidateValues(graph) {
+  const { nodes, distMatrix } = graph;
   const candidates = new Set([0]);
 
-  for (let i = 0; i < orderedNodes.length; i++) {
-    for (let j = i + 1; j < orderedNodes.length; j++) {
-      const left = orderedNodes[i];
-      const right = orderedNodes[j];
+  for (const demand of nodes) {
+    const wi = demand.weight ?? 1;
 
-      const wi = left.weight ?? 1;
-      const wj = right.weight ?? 1;
-      const xi = left.pathPosition;
-      const xj = right.pathPosition;
+    for (const facility of nodes) {
+      const d = getDistance(distMatrix, demand.id, facility.id);
+      const lambda = wi * d;
 
-      const lambda = (wi * wj * (xj - xi)) / (wi + wj);
       if (Number.isFinite(lambda) && lambda >= 0) {
         candidates.add(Number(lambda.toFixed(6)));
       }
@@ -60,8 +24,9 @@ function generateCandidateValues(graph) {
 }
 
 export function generatePCenterParametricSearchSteps(graph, params = {}) {
-  const p = Math.max(1, params.p ?? 2);
-  const candidateValues = generateCandidateValues(graph);
+  const nodeCount = graph?.nodes?.length ?? 0;
+  const p = Math.max(1, Math.min(params.p ?? 2, nodeCount));
+  const candidateValues = generateDiscreteCandidateValues(graph);
 
   const steps = [];
 
@@ -74,55 +39,28 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
         candidateCount: candidateValues.length,
       },
       explanation:
-        `Initializing p-Center parametric search.\n` +
-        `First generate a finite candidate set of λ values from pairs of path vertices.\n` +
-        `Then binary search the sorted candidate list using the λ-feasibility test.`,
+        `Initializing discrete p-Center candidate search.\n` +
+        `Candidate λ values are generated from weighted node-to-node costs w_i d(i,j).\n` +
+        `For correctness, this version scans candidates from small to large and stops at the first feasible λ.`,
     })
   );
 
-  if (candidateValues.length === 0) {
-    steps.push(
-      createSnapshot({
-        type: STEP_TYPES.FINISH,
-        phase: 'finish',
-        metrics: {
-          p,
-          optimalLambda: null,
-          facilityCount: null,
-        },
-        explanation:
-          `Parametric search finished, but no candidate λ values were generated.`,
-      })
-    );
-
-    return steps.map((step, index) => ({
-      ...step,
-      stepIndex: index,
-    }));
-  }
-
-  let low = 0;
-  let high = candidateValues.length - 1;
   let bestResult = null;
-  let iteration = 0;
 
-  while (low <= high) {
-    iteration += 1;
-    const mid = Math.floor((low + high) / 2);
-    const lambdaValue = candidateValues[mid];
+  for (let index = 0; index < candidateValues.length; index++) {
+    const lambdaValue = candidateValues[index];
     const feasibility = runPCenterFeasibilityTest(graph, { p, lambdaValue });
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.EVALUATE,
         phase: 'test_lambda',
+        selected: feasibility.facilityNodeIds,
         covered: feasibility.coveredNodeIds,
         metrics: {
           p,
-          iteration,
-          low,
-          high,
-          mid,
+          candidateIndex: index + 1,
+          candidateCount: candidateValues.length,
           lambdaValue,
           facilityCount: feasibility.facilityCount,
           feasible: feasibility.feasible,
@@ -131,72 +69,42 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
           mode: 'pcenter_feasibility',
           totalLength: feasibility.totalLength,
           intervals: feasibility.intervals,
-          properIntervals: feasibility.properIntervals,
           facilityPositions: feasibility.facilityPositions,
         },
         explanation:
-          `Binary-search iteration ${iteration}.\n` +
-          `Test candidate λ = ${lambdaValue}.\n` +
-          `The feasibility test uses ${feasibility.facilityCount} facilities, so this λ is ${feasibility.feasible ? 'feasible' : 'not feasible'}.`,
+          `Testing candidate λ = ${lambdaValue}.\n` +
+          `Facilities used by feasibility test: ${feasibility.facilityCount}.\n` +
+          `Result: ${feasibility.feasible ? 'feasible' : 'not feasible'}.`,
       })
     );
 
     if (feasibility.feasible) {
       bestResult = feasibility;
-      high = mid - 1;
 
       steps.push(
         createSnapshot({
           type: STEP_TYPES.UPDATE_BEST,
-          phase: 'update_upper_bound',
+          phase: 'first_feasible_found',
+          selected: feasibility.facilityNodeIds,
           covered: feasibility.coveredNodeIds,
           metrics: {
             p,
-            iteration,
             lambdaValue,
             facilityCount: feasibility.facilityCount,
-            nextLow: low,
-            nextHigh: high,
+            candidateIndex: index + 1,
           },
           overlays: {
             mode: 'pcenter_feasibility',
             totalLength: feasibility.totalLength,
             intervals: feasibility.intervals,
-            properIntervals: feasibility.properIntervals,
             facilityPositions: feasibility.facilityPositions,
           },
           explanation:
-            `This λ is feasible, so move left to search for a smaller feasible value.\n` +
-            `Current best upper bound is λ = ${lambdaValue}.`,
+            `This is the first feasible candidate in sorted order, so it is the optimal discrete λ.`,
         })
       );
-    } else {
-      low = mid + 1;
 
-      steps.push(
-        createSnapshot({
-          type: STEP_TYPES.NO_PROGRESS,
-          phase: 'raise_lower_bound',
-          covered: feasibility.coveredNodeIds,
-          metrics: {
-            p,
-            iteration,
-            lambdaValue,
-            facilityCount: feasibility.facilityCount,
-            nextLow: low,
-            nextHigh: high,
-          },
-          overlays: {
-            mode: 'pcenter_feasibility',
-            totalLength: feasibility.totalLength,
-            intervals: feasibility.intervals,
-            properIntervals: feasibility.properIntervals,
-            facilityPositions: feasibility.facilityPositions,
-          },
-          explanation:
-            `This λ is not feasible, so move right to search for a larger value.`,
-        })
-      );
+      break;
     }
   }
 
@@ -204,6 +112,7 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
     createSnapshot({
       type: STEP_TYPES.FINISH,
       phase: 'finish',
+      selected: bestResult?.facilityNodeIds ?? [],
       covered: bestResult?.coveredNodeIds ?? [],
       metrics: {
         p,
@@ -215,14 +124,13 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
             mode: 'pcenter_feasibility',
             totalLength: bestResult.totalLength,
             intervals: bestResult.intervals,
-            properIntervals: bestResult.properIntervals,
             facilityPositions: bestResult.facilityPositions,
           }
         : {},
       explanation:
         bestResult
-          ? `Parametric search finished.\nSmallest feasible candidate λ found: ${bestResult.lambdaValue}.\nFacilities used by the final feasibility test: ${bestResult.facilityCount}.`
-          : `Parametric search finished, but no feasible candidate λ was found.`,
+          ? `Candidate search finished.\nOptimal discrete λ = ${bestResult.lambdaValue}.\nOne feasible facility set found: { ${bestResult.facilityNodeIds.join(', ')} }.`
+          : `Candidate search finished, but no feasible candidate λ was found.`,
     })
   );
 
