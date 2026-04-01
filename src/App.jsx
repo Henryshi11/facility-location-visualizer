@@ -8,7 +8,12 @@ import { generateRandomPathGraph } from './graph/generators/randomPath';
 import { buildSnapshots } from './features/simulation/buildSnapshots';
 import CanvasRenderer from './render/canvasRenderer.jsx';
 
-function formatAlgorithmLabel(algorithmId) {
+const RANDOM_GRAPH_OPTION = '__random_path__';
+
+function getAlgorithmLabel(algorithmId, options) {
+  const found = options.find((item) => item.id === algorithmId);
+  if (found?.label) return found.label;
+
   switch (algorithmId) {
     case ALGORITHMS.EXACT_BRUTEFORCE:
       return 'Exact (Small Only)';
@@ -91,12 +96,25 @@ function formatMetricValue(value) {
   return value.toFixed(2);
 }
 
+function shouldShowLambda(model, algorithm) {
+  if (model === MODELS.SETCOVER) return true;
+  if (model === MODELS.PCENTER) {
+    return (
+      algorithm === ALGORITHMS.FEASIBILITY_TEST ||
+      algorithm === ALGORITHMS.PARAMETRIC_SEARCH
+    );
+  }
+  return false;
+}
+
 export default function App() {
   const [model, setModel] = useState(MODELS.PCENTER);
   const [algorithm, setAlgorithm] = useState(ALGORITHMS.FEASIBILITY_TEST);
 
   const [graph, setGraph] = useState(() => EXAMPLE_GRAPHS[0] ?? generateRandomPathGraph());
-  const [graphSource, setGraphSource] = useState(EXAMPLE_GRAPHS[0]?.name ?? 'Random Path');
+  const [graphSelectorValue, setGraphSelectorValue] = useState(
+    EXAMPLE_GRAPHS[0]?.name ?? RANDOM_GRAPH_OPTION
+  );
 
   const [p, setP] = useState(2);
   const [lambdaValue, setLambdaValue] = useState(30);
@@ -157,30 +175,33 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [isPlaying, currentStepIndex, snapshots, playbackSpeed]);
 
-  const currentSnapshot = snapshots[currentStepIndex] ?? null;
+  const currentSnapshot =
+    currentStepIndex >= 0 && currentStepIndex < snapshots.length
+      ? snapshots[currentStepIndex]
+      : null;
+
   const modelInfo = MODEL_INFO[model];
   const primaryMetric = getPrimaryMetric(currentSnapshot, model);
 
   const handleGenerateRandomPath = () => {
     const randomGraph = generateRandomPathGraph();
     setGraph(randomGraph);
-    setGraphSource(randomGraph.name);
+    setGraphSelectorValue(RANDOM_GRAPH_OPTION);
   };
 
   const handleGraphChange = (event) => {
-    const nextName = event.target.value;
+    const nextValue = event.target.value;
+    setGraphSelectorValue(nextValue);
 
-    if (nextName === 'Random Path') {
+    if (nextValue === RANDOM_GRAPH_OPTION) {
       const randomGraph = generateRandomPathGraph();
       setGraph(randomGraph);
-      setGraphSource(randomGraph.name);
       return;
     }
 
-    const selectedExample = EXAMPLE_GRAPHS.find((item) => item.name === nextName);
+    const selectedExample = EXAMPLE_GRAPHS.find((item) => item.name === nextValue);
     if (selectedExample) {
       setGraph(selectedExample);
-      setGraphSource(selectedExample.name);
     }
   };
 
@@ -190,6 +211,7 @@ export default function App() {
   };
 
   const handleNext = () => {
+    if (snapshots.length === 0) return;
     setIsPlaying(false);
     setCurrentStepIndex((prev) => Math.min(snapshots.length - 1, prev + 1));
   };
@@ -200,6 +222,7 @@ export default function App() {
   };
 
   const scorePreview = (currentSnapshot?.scoreboard ?? []).slice(0, 8);
+  const showLambda = shouldShowLambda(model, algorithm);
 
   return (
     <div style={pageStyle}>
@@ -235,7 +258,7 @@ export default function App() {
             >
               {currentAlgorithmOptions.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {formatAlgorithmLabel(option.id)}
+                  {getAlgorithmLabel(option.id, currentAlgorithmOptions)}
                 </option>
               ))}
             </select>
@@ -243,13 +266,17 @@ export default function App() {
 
           <div style={panelStyle}>
             <div style={labelStyle}>Graph</div>
-            <select value={graphSource} onChange={handleGraphChange} style={inputStyle}>
+            <select
+              value={graphSelectorValue}
+              onChange={handleGraphChange}
+              style={inputStyle}
+            >
               {EXAMPLE_GRAPHS.map((item) => (
                 <option key={item.name} value={item.name}>
                   {item.name}
                 </option>
               ))}
-              <option value="Random Path">Random Path</option>
+              <option value={RANDOM_GRAPH_OPTION}>Random Path</option>
             </select>
           </div>
 
@@ -278,10 +305,15 @@ export default function App() {
               type="number"
               min={0}
               value={lambdaValue}
+              disabled={!showLambda}
               onChange={(event) =>
                 setLambdaValue(Math.max(0, Number(event.target.value) || 0))
               }
-              style={inputStyle}
+              style={{
+                ...inputStyle,
+                opacity: showLambda ? 1 : 0.55,
+                cursor: showLambda ? 'text' : 'not-allowed',
+              }}
             />
           </div>
 
@@ -316,6 +348,7 @@ export default function App() {
                 <button
                   onClick={() => setIsPlaying((prev) => !prev)}
                   style={buttonStyle}
+                  disabled={snapshots.length === 0}
                 >
                   {isPlaying ? 'Pause' : 'Play'}
                 </button>
@@ -350,7 +383,9 @@ export default function App() {
               </div>
               <div style={infoMutedStyle}>{modelInfo?.description}</div>
               <div style={infoMutedStyle}>Graph: {graph?.name ?? '-'}</div>
-              <div style={infoMutedStyle}>Algorithm: {formatAlgorithmLabel(algorithm)}</div>
+              <div style={infoMutedStyle}>
+                Algorithm: {getAlgorithmLabel(algorithm, currentAlgorithmOptions)}
+              </div>
             </div>
 
             <div style={panelStyle}>
@@ -394,9 +429,7 @@ export default function App() {
 
             <div style={panelStyle}>
               <div style={sectionTitleStyle}>Snapshot JSON</div>
-              <pre style={jsonStyle}>
-                {JSON.stringify(currentSnapshot, null, 2)}
-              </pre>
+              <pre style={jsonStyle}>{JSON.stringify(currentSnapshot, null, 2)}</pre>
             </div>
           </div>
         </div>

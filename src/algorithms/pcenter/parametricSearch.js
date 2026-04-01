@@ -4,7 +4,9 @@ import { runPCenterFeasibilityTest } from './feasibilityTest';
 
 function getOrderedPathData(graph) {
   const { nodes, edges } = graph;
-  const orderedNodes = [...nodes].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const orderedNodes = [...nodes].sort((a, b) =>
+    String(a.id).localeCompare(String(b.id))
+  );
 
   const edgeLengthMap = new Map();
   for (const edge of edges) {
@@ -33,8 +35,6 @@ function getOrderedPathData(graph) {
   };
 }
 
-// From the lecture note idea:
-// for a pair (i, j), solve wi (x - xi) = wj (xj - x), then λ = wi (x - xi)
 function generateCandidateValues(graph) {
   const { orderedNodes } = getOrderedPathData(graph);
   const candidates = new Set([0]);
@@ -80,6 +80,27 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
     })
   );
 
+  if (candidateValues.length === 0) {
+    steps.push(
+      createSnapshot({
+        type: STEP_TYPES.FINISH,
+        phase: 'finish',
+        metrics: {
+          p,
+          optimalLambda: null,
+          facilityCount: null,
+        },
+        explanation:
+          `Parametric search finished, but no candidate λ values were generated.`,
+      })
+    );
+
+    return steps.map((step, index) => ({
+      ...step,
+      stepIndex: index,
+    }));
+  }
+
   let low = 0;
   let high = candidateValues.length - 1;
   let bestResult = null;
@@ -89,7 +110,6 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
     iteration += 1;
     const mid = Math.floor((low + high) / 2);
     const lambdaValue = candidateValues[mid];
-
     const feasibility = runPCenterFeasibilityTest(graph, { p, lambdaValue });
 
     steps.push(

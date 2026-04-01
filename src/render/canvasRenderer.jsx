@@ -26,7 +26,9 @@ function drawDiamond(ctx, x, y, r) {
 }
 
 function getOrderedNodes(graph) {
-  return [...(graph?.nodes ?? [])].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  return [...(graph?.nodes ?? [])].sort((a, b) =>
+    String(a.id).localeCompare(String(b.id))
+  );
 }
 
 function getEdgeLengthMap(graph) {
@@ -58,7 +60,11 @@ function computePathPositions(graph) {
 
 function interpolatePoint(nodes, scalar) {
   if (!nodes.length) return null;
-  if (scalar <= nodes[0].pathPosition) return { x: nodes[0].x, y: nodes[0].y };
+
+  if (scalar <= nodes[0].pathPosition) {
+    return { x: nodes[0].x, y: nodes[0].y };
+  }
+
   if (scalar >= nodes[nodes.length - 1].pathPosition) {
     return {
       x: nodes[nodes.length - 1].x,
@@ -95,24 +101,27 @@ export default function CanvasRenderer({ graph, snapshot }) {
     if (!canvas || !container || !graph) return;
 
     const rect = container.getBoundingClientRect();
-    canvas.width = Math.max(300, rect.width * window.devicePixelRatio);
-    canvas.height = Math.max(300, rect.height * window.devicePixelRatio);
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = Math.max(300, Math.floor(rect.width * dpr));
+    canvas.height = Math.max(300, Math.floor(rect.height * dpr));
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${rect.height}px`;
 
     const ctx = canvas.getContext('2d');
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const width = rect.width;
     const height = rect.height;
 
     ctx.clearRect(0, 0, width, height);
 
-    // background
     ctx.fillStyle = '#020617';
     ctx.fillRect(0, 0, width, height);
 
-    // edges
     ctx.strokeStyle = '#334155';
     ctx.lineWidth = 4;
+
     for (const edge of graph.edges ?? []) {
       const u = graph.nodes.find((node) => node.id === edge.u);
       const v = graph.nodes.find((node) => node.id === edge.v);
@@ -137,11 +146,14 @@ export default function CanvasRenderer({ graph, snapshot }) {
     const evaluatingId = snapshot?.evaluating ?? null;
     const currentBest = snapshot?.currentBest ?? null;
 
-    // interval overlays for feasibility test / parametric search
     const overlays = snapshot?.overlays ?? {};
     const intervals = overlays.intervals ?? [];
     const properIntervals = overlays.properIntervals ?? [];
     const facilityPositions = overlays.facilityPositions ?? [];
+    const activeIntervalId = overlays.activeIntervalId ?? null;
+    const coveredProperIntervalIds = new Set(
+      overlays.coveredProperIntervalIds ?? []
+    );
 
     if (intervals.length > 0) {
       const yOffsetBase = 60;
@@ -155,17 +167,30 @@ export default function CanvasRenderer({ graph, snapshot }) {
 
         const y = centerPoint.y - yOffsetBase - (idx % 3) * 18;
 
-        ctx.strokeStyle = properIntervals.some((item) => item.id === interval.id)
-          ? 'rgba(56, 189, 248, 0.85)'
-          : 'rgba(148, 163, 184, 0.35)';
-        ctx.lineWidth = 3;
+        const isProper = properIntervals.some((item) => item.id === interval.id);
+        const isActive = interval.id === activeIntervalId;
+        const isCoveredProper = coveredProperIntervalIds.has(interval.id);
+
+        if (isActive) {
+          ctx.strokeStyle = 'rgba(250, 204, 21, 0.95)';
+          ctx.lineWidth = 4;
+        } else if (isCoveredProper) {
+          ctx.strokeStyle = 'rgba(34, 197, 94, 0.9)';
+          ctx.lineWidth = 3.5;
+        } else if (isProper) {
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+          ctx.lineWidth = 3;
+        } else {
+          ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+          ctx.lineWidth = 2;
+        }
 
         ctx.beginPath();
         ctx.moveTo(leftPoint.x, y);
         ctx.lineTo(rightPoint.x, y);
         ctx.stroke();
 
-        ctx.fillStyle = '#cbd5e1';
+        ctx.fillStyle = isActive ? '#fde68a' : '#cbd5e1';
         ctx.font = '10px Inter, Arial, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(interval.id, centerPoint.x, y - 4);
@@ -191,7 +216,6 @@ export default function CanvasRenderer({ graph, snapshot }) {
       }
     }
 
-    // assignment lines for node-based algorithms
     if (snapshot?.assignments) {
       ctx.strokeStyle = 'rgba(96, 165, 250, 0.35)';
       ctx.lineWidth = 2;
@@ -200,7 +224,9 @@ export default function CanvasRenderer({ graph, snapshot }) {
         const assignment = snapshot.assignments[node.id];
         if (!assignment?.facility) continue;
 
-        const facilityNode = graph.nodes.find((item) => item.id === assignment.facility);
+        const facilityNode = graph.nodes.find(
+          (item) => item.id === assignment.facility
+        );
         if (!facilityNode) continue;
 
         ctx.beginPath();
@@ -210,7 +236,6 @@ export default function CanvasRenderer({ graph, snapshot }) {
       }
     }
 
-    // nodes
     for (const node of graph.nodes ?? []) {
       const isSelected = selectedSet.has(node.id);
       const isCovered = coveredSet.has(node.id);
