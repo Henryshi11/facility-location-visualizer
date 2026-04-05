@@ -22,9 +22,9 @@ Built for coursework review and final project demonstration.
 
 Choose ( p ) facilities to minimize total weighted cost:
 
-[
+$$
 \min_{|F| = p} \sum_i w_i , d(i, F)
-]
+$$
 
 ---
 
@@ -32,9 +32,9 @@ Choose ( p ) facilities to minimize total weighted cost:
 
 Choose ( p ) facilities to minimize the worst weighted cost:
 
-[
+$$
 \min_{|F| = p} \max_i w_i , d(i, F)
-]
+$$
 
 ---
 
@@ -42,13 +42,13 @@ Choose ( p ) facilities to minimize the worst weighted cost:
 
 Given a threshold ( \lambda ), open as few facilities as possible such that:
 
-[
+$$
 w_i , d(i, F) \le \lambda \quad \forall i
-]
+$$
 
-[
+$$
 \min |F|
-]
+$$
 
 ---
 
@@ -64,13 +64,13 @@ w_i , d(i, F) \le \lambda \quad \forall i
 
 * **λ-Feasibility Test (Greedy, path-based)**
 
-  * Transforms each demand into an interval using ( \lambda / w_i )
+  * Transforms each demand into an interval using $( \lambda / w_i )$
   * Uses **left-to-right greedy covering** to test feasibility
   * Represents the decision version of p-Center
 
 * **Parametric Search (Binary Search on λ)**
 
-  * Searches over discrete candidate values of ( \lambda )
+  * Searches over discrete candidate values of $( \lambda )$
   * Uses feasibility test as a decision oracle
   * Exploits monotonicity:
 
@@ -90,9 +90,9 @@ w_i , d(i, F) \le \lambda \quad \forall i
 ## Key Ideas
 
 * All objectives use **weighted cost**:
-  [
+  $$[
   w_i \cdot d(i, F)
-  ]
+  ]$$
 
 * p-Center is solved via:
 
@@ -106,16 +106,7 @@ w_i , d(i, F) \le \lambda \quad \forall i
 
 ---
 
-## Notes
 
-* Designed for **small graphs only**
-* Emphasis is on:
-
-  * algorithm understanding
-  * visual intuition
-  * course-level correctness
-
----
 
 ## Project Structure
 
@@ -141,10 +132,6 @@ npm run dev
 
 ---
 
-## Purpose
 
-This project is intended as:
-
-* a visual aid for learning facility location algorithms
 * a personal course review tool
 * a demonstration of **optimization → decision → search** workflow
