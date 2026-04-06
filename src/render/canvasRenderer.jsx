@@ -63,6 +63,56 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+/**
+ * Pack intervals into rows so that overlapping intervals do not share the same row.
+ * Greedy row assignment:
+ * - sort by left endpoint
+ * - place into the first row whose lastRight is strictly before this interval's left
+ * - otherwise open a new row
+ */
+function packIntervalsIntoRows(intervals, scalarToX, minGapPx = 18) {
+  if (!intervals?.length) {
+    return [];
+  }
+
+  const sorted = [...intervals].sort((a, b) => {
+    if (a.left !== b.left) return a.left - b.left;
+    if (a.right !== b.right) return a.right - b.right;
+    return String(a.id).localeCompare(String(b.id));
+  });
+
+  const rows = [];
+  const laidOut = [];
+
+  for (const interval of sorted) {
+    const leftX = scalarToX(interval.left);
+    const rightX = scalarToX(interval.right);
+
+    let chosenRow = -1;
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex];
+      if (leftX > row.lastRight + minGapPx) {
+        chosenRow = rowIndex;
+        row.lastRight = rightX;
+        break;
+      }
+    }
+
+    if (chosenRow === -1) {
+      chosenRow = rows.length;
+      rows.push({ lastRight: rightX });
+    }
+
+    laidOut.push({
+      ...interval,
+      row: chosenRow,
+    });
+  }
+
+  return laidOut;
+}
+
 export default function CanvasRenderer({
   graph,
   snapshot,
@@ -116,8 +166,6 @@ export default function CanvasRenderer({
 
     const paddingX = 56;
     const paddingBottom = 62;
-    const topPadding = intervals.length > 0 ? 96 : 40;
-    const baseY = clamp(height - paddingBottom, topPadding + 80, height - 44);
     const usableWidth = Math.max(1, width - paddingX * 2);
 
     function scalarToX(scalar) {
@@ -125,6 +173,18 @@ export default function CanvasRenderer({
       const t = clamp(scalar / totalLength, 0, 1);
       return paddingX + t * usableWidth;
     }
+
+    const packedIntervals = packIntervalsIntoRows(intervals, scalarToX, 18);
+    const rowCount = packedIntervals.length
+      ? Math.max(...packedIntervals.map((item) => item.row)) + 1
+      : 0;
+
+    const intervalStartY = 54;
+    const rowSpacing = 28;
+    const intervalBandHeight = rowCount > 0 ? rowCount * rowSpacing + 18 : 0;
+
+    const topPadding = rowCount > 0 ? intervalStartY + intervalBandHeight : 40;
+    const baseY = clamp(height - paddingBottom, topPadding + 80, height - 44);
 
     function nodeToPoint(node) {
       return {
@@ -152,6 +212,7 @@ export default function CanvasRenderer({
     ctx.rect(0, 0, width, height);
     ctx.clip();
 
+    // edges
     ctx.strokeStyle = palette.edge;
     ctx.lineWidth = theme.name === 'neumorphism' ? 3 : 4;
 
@@ -184,10 +245,10 @@ export default function CanvasRenderer({
       ctx.fillText(String(edge?.length ?? 1), midX, midY - 8);
     }
 
-    if (intervals.length > 0) {
-      intervals.forEach((interval, idx) => {
-        const row = idx % 3;
-        const y = topPadding + row * 24;
+    // intervals with automatic row packing
+    if (packedIntervals.length > 0) {
+      for (const interval of packedIntervals) {
+        const y = intervalStartY + interval.row * rowSpacing;
 
         const leftX = scalarToX(interval.left);
         const rightX = scalarToX(interval.right);
@@ -208,14 +269,22 @@ export default function CanvasRenderer({
         ctx.lineTo(rightX, y);
         ctx.stroke();
 
+        // endpoint caps
+        ctx.beginPath();
+        ctx.moveTo(leftX, y - 4);
+        ctx.lineTo(leftX, y + 4);
+        ctx.moveTo(rightX, y - 4);
+        ctx.lineTo(rightX, y + 4);
+        ctx.stroke();
+
         if (isActive) {
           ctx.globalAlpha = 0.12;
           ctx.fillStyle = palette.intervalActive;
           ctx.fillRect(
             Math.min(leftX, rightX),
-            y - 6,
+            y - 7,
             Math.abs(rightX - leftX),
-            12
+            14
           );
           ctx.globalAlpha = 1;
         }
@@ -226,10 +295,11 @@ export default function CanvasRenderer({
             ? '10px "Segoe UI", Arial, sans-serif'
             : '10px Inter, Arial, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(interval.id, centerX, y - 6);
-      });
+        ctx.fillText(interval.id, centerX, y - 8);
+      }
     }
 
+    // facility markers above the chosen node positions
     if (facilityPositions.length > 0) {
       for (const scalar of facilityPositions) {
         const point = scalarToPoint(scalar, baseY);
@@ -257,6 +327,7 @@ export default function CanvasRenderer({
       }
     }
 
+    // assignment lines
     if (snapshot?.assignments) {
       ctx.strokeStyle = palette.assignment;
       ctx.lineWidth = 2;
@@ -280,6 +351,7 @@ export default function CanvasRenderer({
       }
     }
 
+    // nodes
     for (const node of orderedNodes) {
       const point = nodeToPoint(node);
 
@@ -326,7 +398,11 @@ export default function CanvasRenderer({
 
       ctx.fillStyle = fillStyle;
       ctx.strokeStyle = strokeStyle;
-      ctx.lineWidth = isChosenFacility ? 3.5 : theme.name === 'neumorphism' ? 2 : 2.5;
+      ctx.lineWidth = isChosenFacility
+        ? 3.5
+        : theme.name === 'neumorphism'
+          ? 2
+          : 2.5;
 
       if (shape === 'square') {
         drawSquare(ctx, point.x, point.y, 10);
