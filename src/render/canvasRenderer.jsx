@@ -145,13 +145,13 @@ export default function CanvasRenderer({
     const evaluatingId = snapshot?.evaluating ?? null;
     const currentBest = snapshot?.currentBest ?? null;
     const activeIntervalId = overlays.activeIntervalId ?? null;
+    const chosenFacilityId = overlays.chosenFacilityId ?? null;
 
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, width, height);
     ctx.clip();
 
-    // edges
     ctx.strokeStyle = palette.edge;
     ctx.lineWidth = theme.name === 'neumorphism' ? 3 : 4;
 
@@ -184,7 +184,6 @@ export default function CanvasRenderer({
       ctx.fillText(String(edge?.length ?? 1), midX, midY - 8);
     }
 
-    // intervals
     if (intervals.length > 0) {
       intervals.forEach((interval, idx) => {
         const row = idx % 3;
@@ -209,6 +208,18 @@ export default function CanvasRenderer({
         ctx.lineTo(rightX, y);
         ctx.stroke();
 
+        if (isActive) {
+          ctx.globalAlpha = 0.12;
+          ctx.fillStyle = palette.intervalActive;
+          ctx.fillRect(
+            Math.min(leftX, rightX),
+            y - 6,
+            Math.abs(rightX - leftX),
+            12
+          );
+          ctx.globalAlpha = 1;
+        }
+
         ctx.fillStyle = palette.text;
         ctx.font =
           theme.name === 'neumorphism'
@@ -219,7 +230,6 @@ export default function CanvasRenderer({
       });
     }
 
-    // facility markers
     if (facilityPositions.length > 0) {
       for (const scalar of facilityPositions) {
         const point = scalarToPoint(scalar, baseY);
@@ -247,7 +257,6 @@ export default function CanvasRenderer({
       }
     }
 
-    // assignment lines
     if (snapshot?.assignments) {
       ctx.strokeStyle = palette.assignment;
       ctx.lineWidth = 2;
@@ -271,7 +280,6 @@ export default function CanvasRenderer({
       }
     }
 
-    // nodes
     for (const node of orderedNodes) {
       const point = nodeToPoint(node);
 
@@ -279,6 +287,7 @@ export default function CanvasRenderer({
       const isCovered = coveredSet.has(node.id);
       const isEvaluating = evaluatingId === node.id;
       const isCurrentBest = currentBest === node.id;
+      const isChosenFacility = chosenFacilityId === node.id;
 
       let fillStyle = palette.nodeFill;
       let strokeStyle = palette.nodeStroke;
@@ -301,6 +310,13 @@ export default function CanvasRenderer({
         shape = 'diamond';
       }
 
+      if (isChosenFacility) {
+        ctx.beginPath();
+        ctx.fillStyle = palette.glow;
+        ctx.arc(point.x, point.y, 30, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       if (isEvaluating) {
         ctx.beginPath();
         ctx.fillStyle = palette.glow;
@@ -310,7 +326,7 @@ export default function CanvasRenderer({
 
       ctx.fillStyle = fillStyle;
       ctx.strokeStyle = strokeStyle;
-      ctx.lineWidth = theme.name === 'neumorphism' ? 2 : 2.5;
+      ctx.lineWidth = isChosenFacility ? 3.5 : theme.name === 'neumorphism' ? 2 : 2.5;
 
       if (shape === 'square') {
         drawSquare(ctx, point.x, point.y, 10);

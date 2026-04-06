@@ -17,13 +17,13 @@ export const ALGORITHM_OPTIONS = {
   pcenter: [
     {
       id: ALGORITHMS.FEASIBILITY_TEST,
-      label: 'λ-Feasibility Test',
+      label: 'λ-Feasibility Test (Greedy)',
       implemented: true,
       category: 'course_core',
     },
     {
       id: ALGORITHMS.PARAMETRIC_SEARCH,
-      label: 'Parametric Search',
+      label: 'Parametric Search (Binary Search)',
       implemented: true,
       category: 'course_core',
     },

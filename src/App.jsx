@@ -19,9 +19,9 @@ function getAlgorithmLabel(algorithmId, options) {
     case ALGORITHMS.EXACT_BRUTEFORCE:
       return 'Exact (Small Only)';
     case ALGORITHMS.FEASIBILITY_TEST:
-      return 'λ-Feasibility Test';
+      return 'λ-Feasibility Test (Greedy)';
     case ALGORITHMS.PARAMETRIC_SEARCH:
-      return 'Parametric Search';
+      return 'Parametric Search (Binary Search)';
     default:
       return algorithmId;
   }
@@ -108,11 +108,20 @@ function shouldShowLambda(model, algorithm) {
   return false;
 }
 
+function shouldShowP(model) {
+  return model === MODELS.PMEDIAN || model === MODELS.PCENTER;
+}
+
 function SunIcon({ color }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <circle cx="12" cy="12" r="4.5" stroke={color} strokeWidth="1.8" />
-      <path d="M12 2.5V5.2M12 18.8V21.5M21.5 12H18.8M5.2 12H2.5M18.7 5.3L16.8 7.2M7.2 16.8L5.3 18.7M18.7 18.7L16.8 16.8M7.2 7.2L5.3 5.3" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M12 2.5V5.2M12 18.8V21.5M21.5 12H18.8M5.2 12H2.5M18.72 5.28L16.8 7.2M7.2 16.8L5.28 18.72M18.72 18.72L16.8 16.8M7.2 7.2L5.28 5.28"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -121,397 +130,549 @@ function MoonIcon({ color }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
-        d="M18.5 14.8A8 8 0 0 1 9.2 5.5a8.5 8.5 0 1 0 9.3 9.3Z"
+        d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"
         stroke={color}
         strokeWidth="1.8"
-        strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>
   );
 }
 
-function ThemeToggle({ themeName, theme, onChange }) {
-  const isNeo = themeName === 'neumorphism';
-
-  return (
-    <div style={themeToggleWrapStyle(theme)}>
-      <button
-        type="button"
-        onClick={() => onChange('neumorphism')}
-        aria-label="Switch to neumorphism theme"
-        title="Neumorphism"
-        style={themeIconButtonStyle(theme, isNeo)}
-      >
-        <SunIcon color={isNeo ? theme.titleColor : theme.mutedText} />
-      </button>
-
-      <button
-        type="button"
-        onClick={() => onChange('dark')}
-        aria-label="Switch to dark theme"
-        title="Dark"
-        style={themeIconButtonStyle(theme, !isNeo)}
-      >
-        <MoonIcon color={!isNeo ? theme.titleColor : theme.mutedText} />
-      </button>
-    </div>
-  );
-}
-
 export default function App() {
   const [themeName, setThemeName] = useState('dark');
-  const theme = getTheme(themeName);
 
   const [model, setModel] = useState(MODELS.PCENTER);
-  const [algorithm, setAlgorithm] = useState(ALGORITHMS.FEASIBILITY_TEST);
-
-  const [graph, setGraph] = useState(() => EXAMPLE_GRAPHS[0] ?? generateRandomPathGraph());
-  const [graphSelectorValue, setGraphSelectorValue] = useState(
-    EXAMPLE_GRAPHS[0]?.name ?? RANDOM_GRAPH_OPTION
+  const algorithmOptions = useMemo(
+    () => getImplementedAlgorithmOptions(model),
+    [model]
   );
 
+  const [algorithm, setAlgorithm] = useState(
+    algorithmOptions[0]?.id ?? ALGORITHMS.EXACT_BRUTEFORCE
+  );
+
+  const [graphKey, setGraphKey] = useState(EXAMPLE_GRAPHS[0]?.name ?? '');
+  const [customGraph, setCustomGraph] = useState(null);
+
   const [p, setP] = useState(2);
-  const [lambdaValue, setLambdaValue] = useState(30);
+  const [lambdaValue, setLambdaValue] = useState(8);
 
   const [snapshots, setSnapshots] = useState([]);
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(700);
-
-  const currentAlgorithmOptions = useMemo(() => {
-    return getImplementedAlgorithmOptions(model);
-  }, [model]);
+  const [stepIndex, setStepIndex] = useState(0);
 
   useEffect(() => {
-    const available = getImplementedAlgorithmOptions(model);
-    const stillValid = available.some((item) => item.id === algorithm);
-
-    if (!stillValid && available.length > 0) {
-      setAlgorithm(available[0].id);
+    const nextOptions = getImplementedAlgorithmOptions(model);
+    if (!nextOptions.some((item) => item.id === algorithm)) {
+      setAlgorithm(nextOptions[0]?.id ?? ALGORITHMS.EXACT_BRUTEFORCE);
     }
   }, [model, algorithm]);
 
-  useEffect(() => {
-    const maxAllowedP = Math.max(1, graph?.nodes?.length ?? 1);
-    if (p > maxAllowedP) {
-      setP(maxAllowedP);
+  const theme = useMemo(() => getTheme(themeName), [themeName]);
+
+  const selectedGraph = useMemo(() => {
+    if (graphKey === RANDOM_GRAPH_OPTION && customGraph) {
+      return customGraph;
     }
-  }, [graph, p]);
 
-  useEffect(() => {
-    const nextSnapshots = buildSnapshots({
-      model,
-      algorithm,
-      graph,
-      params: { p, lambdaValue },
-    });
+    return EXAMPLE_GRAPHS.find((graph) => graph.name === graphKey) ?? EXAMPLE_GRAPHS[0];
+  }, [graphKey, customGraph]);
 
-    setSnapshots(nextSnapshots);
-    setCurrentStepIndex(0);
-    setIsPlaying(false);
-  }, [model, algorithm, graph, p, lambdaValue]);
-
-  useEffect(() => {
-    if (!isPlaying) return;
-    if (snapshots.length === 0) return;
-
-    const timer = window.setTimeout(() => {
-      setCurrentStepIndex((prev) => {
-        if (prev >= snapshots.length - 1) {
-          setIsPlaying(false);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, playbackSpeed);
-
-    return () => window.clearTimeout(timer);
-  }, [isPlaying, currentStepIndex, snapshots, playbackSpeed]);
-
-  useEffect(() => {
-    document.body.style.background = theme.bodyBg;
-    document.body.style.color = theme.bodyText;
-    document.body.style.fontFamily =
-      theme.name === 'neumorphism'
-        ? 'Segoe UI, Inter, Arial, sans-serif'
-        : 'Inter, Arial, sans-serif';
-  }, [theme]);
-
-  const currentSnapshot =
-    currentStepIndex >= 0 && currentStepIndex < snapshots.length
-      ? snapshots[currentStepIndex]
-      : null;
-
-  const modelInfo = MODEL_INFO[model];
+  const currentSnapshot = snapshots[stepIndex] ?? null;
   const primaryMetric = getPrimaryMetric(currentSnapshot, model);
 
-  const handleGenerateRandomPath = () => {
-    const randomGraph = generateRandomPathGraph();
-    setGraph(randomGraph);
-    setGraphSelectorValue(RANDOM_GRAPH_OPTION);
+  function rebuildSnapshots(nextGraph = selectedGraph) {
+    const built = buildSnapshots({
+      model,
+      algorithm,
+      graph: nextGraph,
+      params: {
+        p,
+        lambdaValue,
+      },
+    });
+
+    setSnapshots(built);
+    setStepIndex(0);
+  }
+
+  useEffect(() => {
+    rebuildSnapshots();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, algorithm, graphKey, customGraph, p, lambdaValue]);
+
+  function handleRandomGraph() {
+    const graph = generateRandomPathGraph();
+    setCustomGraph(graph);
+    setGraphKey(RANDOM_GRAPH_OPTION);
+  }
+
+  const pageStyle = {
+    minHeight: '100vh',
+    background: theme.pageBg,
+    color: theme.bodyText,
+    fontFamily: 'Inter, Arial, sans-serif',
   };
 
-  const handleGraphChange = (event) => {
-    const nextValue = event.target.value;
-    setGraphSelectorValue(nextValue);
-
-    if (nextValue === RANDOM_GRAPH_OPTION) {
-      const randomGraph = generateRandomPathGraph();
-      setGraph(randomGraph);
-      return;
-    }
-
-    const selectedExample = EXAMPLE_GRAPHS.find((item) => item.name === nextValue);
-    if (selectedExample) {
-      setGraph(selectedExample);
-    }
+  const wrapperStyle = {
+    maxWidth: '1500px',
+    margin: '0 auto',
+    padding: '28px 20px 44px',
   };
 
-  const handlePrev = () => {
-    setIsPlaying(false);
-    setCurrentStepIndex((prev) => Math.max(0, prev - 1));
+  const headerStyle = {
+    marginBottom: '18px',
   };
 
-  const handleNext = () => {
-    if (snapshots.length === 0) return;
-    setIsPlaying(false);
-    setCurrentStepIndex((prev) => Math.min(snapshots.length - 1, prev + 1));
+  const titleStyle = {
+    fontSize: '32px',
+    fontWeight: 800,
+    lineHeight: 1.1,
+    color: theme.titleColor,
+    marginBottom: '8px',
+    letterSpacing: '-0.03em',
   };
 
-  const handleReset = () => {
-    setIsPlaying(false);
-    setCurrentStepIndex(0);
+  const subtitleStyle = {
+    fontSize: '15px',
+    color: theme.subtitleColor,
+    maxWidth: '820px',
+    lineHeight: 1.6,
   };
 
-  const scorePreview = (currentSnapshot?.scoreboard ?? []).slice(0, 8);
-  const showLambda = shouldShowLambda(model, algorithm);
+  const topBarStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '16px',
+    marginBottom: '22px',
+  };
+
+  const themeButtonStyle = (active) => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '10px 14px',
+    borderRadius: theme.radius?.button ?? '14px',
+    border: theme.buttonBorder,
+    background: active ? theme.buttonBg : theme.panelBg,
+    color: theme.buttonText,
+    boxShadow: theme.buttonShadow,
+    cursor: 'pointer',
+  });
+
+  const gridStyle = {
+    display: 'grid',
+    gridTemplateColumns: '360px minmax(0, 1fr) 340px',
+    gap: '18px',
+    alignItems: 'start',
+  };
+
+  const panelStyle = {
+    background: theme.panelBg,
+    border: theme.panelBorder,
+    boxShadow: theme.panelShadow,
+    borderRadius: theme.radius?.panel ?? '18px',
+    padding: '18px',
+  };
+
+  const sectionTitleStyle = {
+    fontSize: '15px',
+    fontWeight: 700,
+    color: theme.titleColor,
+    marginBottom: '12px',
+  };
+
+  const labelStyle = {
+    display: 'block',
+    marginBottom: '6px',
+    fontSize: '13px',
+    color: theme.mutedText,
+  };
+
+  const controlGroupStyle = {
+    marginBottom: '14px',
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '11px 12px',
+    borderRadius: theme.radius?.input ?? '12px',
+    border: theme.inputBorder,
+    background: theme.inputBg,
+    color: theme.inputText,
+    boxShadow: theme.inputShadow,
+  };
+
+  const buttonRowStyle = {
+    display: 'flex',
+    gap: '10px',
+    flexWrap: 'wrap',
+  };
+
+  const actionButtonStyle = {
+    padding: '11px 14px',
+    borderRadius: theme.radius?.button ?? '14px',
+    border: theme.buttonBorder,
+    background: theme.buttonBg,
+    color: theme.buttonText,
+    boxShadow: theme.buttonShadow,
+    cursor: 'pointer',
+  };
+
+  const neutralButtonStyle = {
+    ...actionButtonStyle,
+    background: theme.panelBg,
+    color: theme.bodyText,
+  };
+
+  const metricCardStyle = {
+    ...panelStyle,
+    padding: '20px',
+  };
+
+  const metricLabelStyle = {
+    color: theme.mutedText,
+    fontSize: '13px',
+    marginBottom: '6px',
+  };
+
+  const metricValueStyle = {
+    fontSize: '40px',
+    fontWeight: 800,
+    lineHeight: 1.1,
+    color: theme.titleColor,
+    marginBottom: '12px',
+    letterSpacing: '-0.03em',
+  };
+
+  const infoLineStyle = {
+    marginBottom: '9px',
+    lineHeight: 1.55,
+    fontSize: '14px',
+  };
+
+  const mutedBlockStyle = {
+    color: theme.mutedText,
+    fontSize: '14px',
+    lineHeight: 1.6,
+    whiteSpace: 'pre-wrap',
+  };
+
+  const navRowStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    marginTop: '14px',
+    flexWrap: 'wrap',
+  };
+
+  const scoreListStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    marginTop: '10px',
+  };
+
+  const scoreRowStyle = (isBest = false) => ({
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: '12px',
+    padding: '9px 11px',
+    background: theme.scoreRowBg,
+    borderRadius: theme.radius?.input ?? '14px',
+    boxShadow:
+      theme.name === 'neumorphism'
+        ? '6px 6px 14px rgba(163,177,198,0.18), -6px -6px 14px rgba(255,255,255,0.56)'
+        : 'none',
+    border: isBest
+      ? theme.name === 'neumorphism'
+        ? '1px solid rgba(117,133,171,0.42)'
+        : '1px solid #3b82f6'
+      : 'none',
+  });
+
+  function renderExtraMetrics() {
+    if (!currentSnapshot) return null;
+
+    const m = currentSnapshot.metrics ?? {};
+
+    return (
+      <div style={{ marginTop: '14px' }}>
+        <div style={sectionTitleStyle}>Step Details</div>
+
+        {m.low != null || m.mid != null || m.high != null ? (
+          <>
+            <div style={infoLineStyle}>low: {formatMetricValue(m.low)}</div>
+            <div style={infoLineStyle}>mid: {formatMetricValue(m.mid)}</div>
+            <div style={infoLineStyle}>high: {formatMetricValue(m.high)}</div>
+          </>
+        ) : null}
+
+        {m.usedFacilities != null ? (
+          <div style={infoLineStyle}>
+            facilities used: {formatMetricValue(m.usedFacilities)}
+          </div>
+        ) : null}
+
+        {m.coveredCount != null && m.total != null ? (
+          <div style={infoLineStyle}>
+            covered: {formatMetricValue(m.coveredCount)} / {formatMetricValue(m.total)}
+          </div>
+        ) : null}
+
+        {m.decision ? (
+          <div style={infoLineStyle}>decision: {String(m.decision)}</div>
+        ) : null}
+
+        {m.feasible != null ? (
+          <div style={infoLineStyle}>
+            feasible: {m.feasible ? 'true' : 'false'}
+          </div>
+        ) : null}
+
+        {m.checked != null ? (
+          <div style={infoLineStyle}>step count: {formatMetricValue(m.checked)}</div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
-    <div style={pageStyle(theme)}>
-      <div style={shellStyle}>
-        <div style={headerRowStyle}>
+    <div style={pageStyle}>
+      <div style={wrapperStyle}>
+        <div style={topBarStyle}>
           <div style={headerStyle}>
-            <h1 style={titleStyle(theme)}>Facility Location Visualizer</h1>
-            <p style={subtitleStyle(theme)}>
-              Course-focused visualization for p-median, p-center, covering, and p-center
+            <div style={titleStyle}>Facility Location Visualizer</div>
+            <div style={subtitleStyle}>
+              Interactive visualization for p-Median, p-Center, and Cost Covering.
+              Focused on exact baselines, greedy feasibility, and binary-search-style
               parametric search on path graphs.
-            </p>
+            </div>
           </div>
 
-          <ThemeToggle
-            themeName={themeName}
-            theme={theme}
-            onChange={setThemeName}
-          />
+          <div style={buttonRowStyle}>
+            <button
+              type="button"
+              style={themeButtonStyle(themeName === 'dark')}
+              onClick={() => setThemeName('dark')}
+            >
+              <MoonIcon color={themeName === 'dark' ? '#ffffff' : theme.bodyText} />
+              Dark
+            </button>
+            <button
+              type="button"
+              style={themeButtonStyle(themeName === 'neumorphism')}
+              onClick={() => setThemeName('neumorphism')}
+            >
+              <SunIcon color={themeName === 'neumorphism' ? '#ffffff' : theme.bodyText} />
+              Neumorphism
+            </button>
+          </div>
         </div>
 
-        <div style={controlsPanelStyle(theme)}>
-          <div style={controlsGridStyle}>
-            <div style={controlItemStyle}>
-              <div style={labelStyle(theme)}>Model</div>
+        <div style={gridStyle}>
+          <div style={panelStyle}>
+            <div style={sectionTitleStyle}>Controls</div>
+
+            <div style={controlGroupStyle}>
+              <label style={labelStyle}>Model</label>
               <select
+                style={inputStyle}
                 value={model}
-                onChange={(event) => setModel(event.target.value)}
-                style={inputStyle(theme)}
+                onChange={(e) => setModel(e.target.value)}
               >
-                <option value={MODELS.PMEDIAN}>p-Median</option>
-                <option value={MODELS.PCENTER}>p-Center</option>
-                <option value={MODELS.SETCOVER}>Covering</option>
+                {Object.values(MODELS).map((value) => (
+                  <option key={value} value={value}>
+                    {MODEL_INFO[value]?.name ?? value}
+                  </option>
+                ))}
               </select>
             </div>
 
-            <div style={controlItemStyle}>
-              <div style={labelStyle(theme)}>Algorithm</div>
+            <div style={controlGroupStyle}>
+              <label style={labelStyle}>Algorithm</label>
               <select
+                style={inputStyle}
                 value={algorithm}
-                onChange={(event) => setAlgorithm(event.target.value)}
-                style={inputStyle(theme)}
+                onChange={(e) => setAlgorithm(e.target.value)}
               >
-                {currentAlgorithmOptions.map((option) => (
+                {algorithmOptions.map((option) => (
                   <option key={option.id} value={option.id}>
-                    {getAlgorithmLabel(option.id, currentAlgorithmOptions)}
+                    {getAlgorithmLabel(option.id, algorithmOptions)}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div style={controlItemStyle}>
-              <div style={labelStyle(theme)}>Graph</div>
+            <div style={controlGroupStyle}>
+              <label style={labelStyle}>Graph</label>
               <select
-                value={graphSelectorValue}
-                onChange={handleGraphChange}
-                style={inputStyle(theme)}
+                style={inputStyle}
+                value={graphKey}
+                onChange={(e) => setGraphKey(e.target.value)}
               >
-                {EXAMPLE_GRAPHS.map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name}
+                {EXAMPLE_GRAPHS.map((graph) => (
+                  <option key={graph.name} value={graph.name}>
+                    {graph.name}
                   </option>
                 ))}
-                <option value={RANDOM_GRAPH_OPTION}>Random Path</option>
+                {customGraph ? (
+                  <option value={RANDOM_GRAPH_OPTION}>
+                    {customGraph.name}
+                  </option>
+                ) : null}
               </select>
             </div>
 
-            <div style={controlItemStyle}>
-              <div style={labelStyle(theme)}>Random</div>
-              <button onClick={handleGenerateRandomPath} style={buttonStyle(theme)}>
+            <div style={buttonRowStyle}>
+              <button type="button" style={neutralButtonStyle} onClick={handleRandomGraph}>
                 Generate Random Path
+              </button>
+              <button type="button" style={actionButtonStyle} onClick={() => rebuildSnapshots()}>
+                Rebuild
               </button>
             </div>
 
-            <div style={controlItemStyle}>
-              <div style={labelStyle(theme)}>p</div>
-              <input
-                type="number"
-                min={1}
-                max={graph?.nodes?.length ?? 1}
-                value={p}
-                onChange={(event) => setP(Math.max(1, Number(event.target.value) || 1))}
-                style={inputStyle(theme)}
-              />
-            </div>
-
-            <div style={controlItemStyle}>
-              <div style={labelStyle(theme)}>λ</div>
-              <input
-                type="number"
-                min={0}
-                value={lambdaValue}
-                disabled={!showLambda}
-                onChange={(event) =>
-                  setLambdaValue(Math.max(0, Number(event.target.value) || 0))
-                }
-                style={{
-                  ...inputStyle(theme),
-                  opacity: showLambda ? 1 : 0.55,
-                  cursor: showLambda ? 'text' : 'not-allowed',
-                }}
-              />
-            </div>
-
-            <div style={controlItemStyle}>
-              <div style={labelStyle(theme)}>Speed (ms)</div>
-              <input
-                type="number"
-                min={100}
-                step={100}
-                value={playbackSpeed}
-                onChange={(event) =>
-                  setPlaybackSpeed(Math.max(100, Number(event.target.value) || 700))
-                }
-                style={inputStyle(theme)}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div style={mainGridStyle}>
-          <div style={leftColumnStyle}>
-            <div style={panelStyle(theme, true)}>
-              <div style={sectionTitleStyle(theme)}>Visualization</div>
-              <CanvasRenderer
-                graph={graph}
-                snapshot={currentSnapshot}
-                themeName={themeName}
-                themeTokens={theme}
-              />
-            </div>
-
-            <div style={panelStyle(theme)}>
-              <div style={sectionTitleStyle(theme)}>Playback</div>
-              <div style={buttonRowStyle}>
-                <button onClick={handlePrev} style={buttonStyle(theme)}>
-                  Prev
-                </button>
-                <button
-                  onClick={() => setIsPlaying((prev) => !prev)}
-                  style={buttonStyle(theme)}
-                  disabled={snapshots.length === 0}
-                >
-                  {isPlaying ? 'Pause' : 'Play'}
-                </button>
-                <button onClick={handleNext} style={buttonStyle(theme)}>
-                  Next
-                </button>
-                <button onClick={handleReset} style={buttonStyle(theme)}>
-                  Reset
-                </button>
+            {shouldShowP(model) ? (
+              <div style={{ ...controlGroupStyle, marginTop: '14px' }}>
+                <label style={labelStyle}>p</label>
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="1"
+                  max="8"
+                  value={p}
+                  onChange={(e) => setP(Math.max(1, Number(e.target.value) || 1))}
+                />
               </div>
+            ) : null}
 
-              <div style={metaRowStyle(theme)}>
-                <div>
-                  <strong>Step:</strong> {snapshots.length === 0 ? 0 : currentStepIndex + 1} /{' '}
-                  {snapshots.length}
-                </div>
-                <div>
-                  <strong>Phase:</strong> {currentSnapshot?.phase ?? '-'}
-                </div>
-                <div>
-                  <strong>Round:</strong> {getRoundLabel(currentSnapshot, model)}
-                </div>
+            {shouldShowLambda(model, algorithm) ? (
+              <div style={controlGroupStyle}>
+                <label style={labelStyle}>λ</label>
+                <input
+                  style={inputStyle}
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={lambdaValue}
+                  onChange={(e) => setLambdaValue(Math.max(0, Number(e.target.value) || 0))}
+                />
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: '18px' }}>
+              <div style={sectionTitleStyle}>Model Summary</div>
+              <div style={mutedBlockStyle}>
+                {MODEL_INFO[model]?.description ?? 'No description available.'}
               </div>
             </div>
           </div>
 
-          <div style={rightColumnStyle}>
-            <div style={panelStyle(theme)}>
-              <div style={sectionTitleStyle(theme)}>Model Summary</div>
-              <div style={infoLineStyle}>
-                <strong>{modelInfo?.name ?? '-'}</strong>
+          <div style={panelStyle}>
+            <div style={{ marginBottom: '12px', ...sectionTitleStyle }}>
+              Visualization
+            </div>
+
+            <CanvasRenderer
+              graph={selectedGraph}
+              snapshot={currentSnapshot}
+              themeName={themeName}
+              themeTokens={theme}
+            />
+
+            <div style={navRowStyle}>
+              <button
+                type="button"
+                style={neutralButtonStyle}
+                onClick={() => setStepIndex((v) => Math.max(0, v - 1))}
+                disabled={stepIndex <= 0}
+              >
+                Previous
+              </button>
+
+              <button
+                type="button"
+                style={neutralButtonStyle}
+                onClick={() =>
+                  setStepIndex((v) => Math.min(Math.max(0, snapshots.length - 1), v + 1))
+                }
+                disabled={stepIndex >= snapshots.length - 1}
+              >
+                Next
+              </button>
+
+              <button
+                type="button"
+                style={neutralButtonStyle}
+                onClick={() => setStepIndex(0)}
+                disabled={!snapshots.length}
+              >
+                Reset
+              </button>
+
+              <div style={{ marginLeft: '4px', color: theme.mutedText, fontSize: '14px' }}>
+                step {snapshots.length ? stepIndex + 1 : 0} / {snapshots.length}
               </div>
-              <div style={infoMutedStyle(theme)}>{modelInfo?.description ?? '-'}</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <div style={metricCardStyle}>
+              <div style={metricLabelStyle}>
+                {primaryMetric?.label ?? 'Metric'}
+              </div>
+              <div style={metricValueStyle}>
+                {formatMetricValue(primaryMetric?.value)}
+              </div>
+
               <div style={infoLineStyle}>
-                <strong>Graph:</strong> {graph?.name ?? '-'}
+                <strong>model:</strong> {MODEL_INFO[model]?.name ?? model}
               </div>
               <div style={infoLineStyle}>
-                <strong>Algorithm:</strong>{' '}
-                {getAlgorithmLabel(algorithm, currentAlgorithmOptions)}
+                <strong>algorithm:</strong> {getAlgorithmLabel(algorithm, algorithmOptions)}
+              </div>
+              <div style={infoLineStyle}>
+                <strong>round:</strong> {getRoundLabel(currentSnapshot, model)}
+              </div>
+
+              {renderExtraMetrics()}
+            </div>
+
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Explanation</div>
+              <div style={mutedBlockStyle}>
+                {currentSnapshot?.explanation ?? 'No snapshot available yet.'}
               </div>
             </div>
 
-            <div style={panelStyle(theme, true)}>
-              <div style={sectionTitleStyle(theme)}>Current Metric</div>
-              {primaryMetric ? (
-                <>
-                  <div style={infoMutedStyle(theme)}>{primaryMetric.label}</div>
-                  <div style={metricValueStyle(theme)}>
-                    {formatMetricValue(primaryMetric.value)}
-                  </div>
-                </>
-              ) : (
-                <div style={infoMutedStyle(theme)}>-</div>
-              )}
-            </div>
-
-            <div style={panelStyle(theme)}>
-              <div style={sectionTitleStyle(theme)}>Explanation</div>
-              <p style={explanationStyle(theme)}>
-                {currentSnapshot?.explanation ?? 'No explanation available.'}
-              </p>
-            </div>
-
-            <div style={panelStyle(theme)}>
-              <div style={sectionTitleStyle(theme)}>Scoreboard Preview</div>
-              {scorePreview.length === 0 ? (
-                <div style={infoMutedStyle(theme)}>No scoreboard for this step.</div>
-              ) : (
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Scoreboard</div>
+              {currentSnapshot?.scoreboard?.length ? (
                 <div style={scoreListStyle}>
-                  {scorePreview.map((item) => (
-                    <div key={item.id} style={scoreRowStyle(theme, item.isBest)}>
-                      <span>{item.id}</span>
-                      <span>{formatMetricValue(item.score)}</span>
+                  {currentSnapshot.scoreboard.map((row) => (
+                    <div key={row.id} style={scoreRowStyle(Boolean(row.isBest))}>
+                      <span>{row.id}</span>
+                      <span>{formatMetricValue(row.score)}</span>
                     </div>
                   ))}
                 </div>
+              ) : (
+                <div style={mutedBlockStyle}>
+                  No scoreboard entries for this step.
+                </div>
               )}
             </div>
 
-            <div style={panelStyle(theme)}>
-              <div style={sectionTitleStyle(theme)}>Snapshot JSON</div>
-              <pre style={jsonStyle(theme)}>
-                {JSON.stringify(currentSnapshot ?? {}, null, 2)}
-              </pre>
+            <div style={panelStyle}>
+              <div style={sectionTitleStyle}>Binary Search Guide</div>
+              <div style={mutedBlockStyle}>
+                For p-Center parametric search:
+                {'\n'}- infeasible λ → move right
+                {'\n'}- feasible λ → record answer, move left
+                {'\n'}This works because feasibility is monotone in λ.
+              </div>
             </div>
           </div>
         </div>
@@ -519,250 +680,3 @@ export default function App() {
     </div>
   );
 }
-
-const pageStyle = (theme) => ({
-  minHeight: '100vh',
-  background: theme.pageBg,
-  color: theme.bodyText,
-  padding: '20px 24px 28px',
-});
-
-const shellStyle = {
-  maxWidth: '1680px',
-  margin: '0 auto',
-};
-
-const headerRowStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'flex-start',
-  gap: '16px',
-  marginBottom: '18px',
-};
-
-const headerStyle = {
-  flex: 1,
-};
-
-const titleStyle = (theme) => ({
-  margin: 0,
-  fontSize: '32px',
-  fontWeight: 800,
-  letterSpacing: '-0.02em',
-  color: theme.titleColor,
-});
-
-const subtitleStyle = (theme) => ({
-  marginTop: '10px',
-  marginBottom: 0,
-  fontSize: '15px',
-  color: theme.subtitleColor,
-});
-
-const themeToggleWrapStyle = (theme) => ({
-  display: 'flex',
-  alignItems: 'center',
-  gap: '10px',
-  padding: '10px',
-  borderRadius: theme.radius?.panel ?? '18px',
-  background: theme.panelBg,
-  border: theme.panelBorder,
-  boxShadow: theme.panelShadow,
-});
-
-const themeIconButtonStyle = (theme, active) => ({
-  width: '42px',
-  height: '42px',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  borderRadius: '999px',
-  cursor: 'pointer',
-  border: theme.buttonBorder,
-  background: theme.buttonBg,
-  boxShadow:
-    theme.name === 'neumorphism'
-      ? active
-        ? theme.buttonPressed || theme.inputShadow
-        : theme.buttonShadow
-      : active
-        ? '0 0 0 1px rgba(255,255,255,0.1) inset, 0 0 0 2px rgba(96,165,250,0.35)'
-        : theme.buttonShadow,
-  color: active ? theme.titleColor : theme.mutedText,
-});
-
-const controlsPanelStyle = (theme) => ({
-  background: theme.panelBg,
-  border: theme.panelBorder,
-  borderRadius: theme.radius?.panel ?? '18px',
-  boxShadow: theme.panelShadow,
-  padding: '14px 16px',
-  marginBottom: '16px',
-});
-
-const controlsGridStyle = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
-  gap: '16px',
-  alignItems: 'end',
-};
-
-const controlItemStyle = {
-  minWidth: 0,
-};
-
-const mainGridStyle = {
-  display: 'grid',
-  gridTemplateColumns: '1.6fr 0.95fr',
-  gap: '18px',
-};
-
-const leftColumnStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '16px',
-};
-
-const rightColumnStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '16px',
-};
-
-const panelStyle = (theme, strong = false) => ({
-  background:
-    theme.name === 'neumorphism' && strong
-      ? '#DDE3EA'
-      : theme.panelBg,
-  border: theme.panelBorder,
-  borderRadius: theme.radius?.panel ?? '18px',
-  padding: '16px',
-  boxShadow:
-    strong && theme.name === 'neumorphism'
-      ? `
-        14px 14px 30px rgba(163,177,198,0.48),
-        -14px -14px 30px rgba(255,255,255,0.9)
-      `
-      : strong && theme.name !== 'neumorphism'
-        ? '0 10px 28px rgba(0,0,0,0.24)'
-        : theme.panelShadow,
-});
-
-const sectionTitleStyle = (theme) => ({
-  fontWeight: 800,
-  fontSize: '18px',
-  marginBottom: '12px',
-  color: theme.titleColor,
-});
-
-const labelStyle = (theme) => ({
-  fontSize: '12px',
-  fontWeight: 600,
-  color: theme.mutedText,
-  marginBottom: '8px',
-});
-
-const inputStyle = (theme) => ({
-  width: '100%',
-  background: theme.inputBg,
-  color: theme.inputText,
-  border: theme.inputBorder,
-  borderRadius: theme.radius?.input ?? '12px',
-  padding: '11px 12px',
-  boxShadow: theme.inputShadow,
-  outline: 'none',
-});
-
-const buttonStyle = (theme) => ({
-  width: '100%',
-  background: theme.buttonBg,
-  color: theme.buttonText,
-  border: theme.buttonBorder,
-  borderRadius: theme.radius?.button ?? '14px',
-  padding: '11px 14px',
-  cursor: 'pointer',
-  boxShadow: theme.buttonShadow,
-  fontWeight: 600,
-});
-
-const buttonRowStyle = {
-  display: 'flex',
-  gap: '10px',
-  flexWrap: 'wrap',
-};
-
-const metaRowStyle = (theme) => ({
-  display: 'flex',
-  gap: '16px',
-  marginTop: '14px',
-  flexWrap: 'wrap',
-  color: theme.softText,
-});
-
-const explanationStyle = (theme) => ({
-  margin: 0,
-  whiteSpace: 'pre-wrap',
-  lineHeight: 1.65,
-  color: theme.bodyText,
-  fontFamily: 'inherit',
-  fontSize: '15px',
-});
-
-const jsonStyle = (theme) => ({
-  margin: 0,
-  maxHeight: '320px',
-  overflow: 'auto',
-  background: theme.codeBg,
-  padding: '12px',
-  borderRadius: theme.radius?.code ?? '16px',
-  fontSize: '12px',
-  color: theme.bodyText,
-  boxShadow:
-    theme.name === 'neumorphism'
-      ? 'inset 4px 4px 10px rgba(163,177,198,0.25), inset -4px -4px 10px rgba(255,255,255,0.7)'
-      : 'none',
-});
-
-const infoLineStyle = {
-  marginBottom: '10px',
-  lineHeight: 1.5,
-};
-
-const infoMutedStyle = (theme) => ({
-  color: theme.mutedText,
-  marginBottom: '8px',
-  lineHeight: 1.55,
-});
-
-const metricValueStyle = (theme) => ({
-  fontSize: '40px',
-  fontWeight: 800,
-  lineHeight: 1.1,
-  color: theme.titleColor,
-  letterSpacing: '-0.03em',
-  marginTop: '4px',
-});
-
-const scoreListStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '8px',
-};
-
-const scoreRowStyle = (theme, isBest = false) => ({
-  display: 'flex',
-  justifyContent: 'space-between',
-  gap: '12px',
-  padding: '9px 11px',
-  background: theme.scoreRowBg,
-  borderRadius: theme.radius?.input ?? '14px',
-  boxShadow:
-    theme.name === 'neumorphism'
-      ? '6px 6px 14px rgba(163,177,198,0.18), -6px -6px 14px rgba(255,255,255,0.56)'
-      : 'none',
-  border: isBest
-    ? theme.name === 'neumorphism'
-      ? '1px solid rgba(117,133,171,0.42)'
-      : '1px solid #3b82f6'
-    : 'none',
-});

@@ -40,8 +40,40 @@ export function createSnapshot({
     pruned,
 
     scoreboard,
-    metrics,
+    metrics: {
+      iteration: null,
+      round: null,
+      p: null,
+      lambdaValue: null,
+      totalCost: null,
+      maxCost: null,
+      optimalLambda: null,
+      facilityCount: null,
+      coveredCount: null,
+      total: null,
+      checked: null,
+      totalCombos: null,
+      candidateCount: null,
+      candidateIndex: null,
 
-    overlays,
+      low: null,
+      mid: null,
+      high: null,
+      decision: null,
+      usedFacilities: null,
+
+      ...metrics,
+    },
+
+    overlays: {
+      mode: null,
+      totalLength: null,
+      intervals: [],
+      facilityPositions: [],
+      activeIntervalId: null,
+      chosenFacilityId: null,
+      candidateValues: [],
+      ...overlays,
+    },
   };
 }

@@ -37,44 +37,66 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
       metrics: {
         p,
         candidateCount: candidateValues.length,
+        low: 0,
+        high: candidateValues.length - 1,
+        mid: null,
+      },
+      overlays: {
+        candidateValues,
       },
       explanation:
-        `Initializing discrete p-Center candidate search.\n` +
+        `Initializing binary-search parametric search for p-Center.\n` +
         `Candidate λ values are generated from weighted node-to-node costs w_i d(i,j).\n` +
-        `For correctness, this version scans candidates from small to large and stops at the first feasible λ.`,
+        `Because feasibility is monotone in λ, we can binary search for the smallest feasible λ.`,
     })
   );
 
+  let low = 0;
+  let high = candidateValues.length - 1;
   let bestResult = null;
 
-  for (let index = 0; index < candidateValues.length; index++) {
-    const lambdaValue = candidateValues[index];
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const lambdaValue = candidateValues[mid];
     const feasibility = runPCenterFeasibilityTest(graph, { p, lambdaValue });
+
+    const decision = feasibility.feasible ? 'move_left' : 'move_right';
 
     steps.push(
       createSnapshot({
         type: STEP_TYPES.EVALUATE,
-        phase: 'test_lambda',
+        phase: 'binary_search_test',
         selected: feasibility.facilityNodeIds,
         covered: feasibility.coveredNodeIds,
+        assignments: feasibility.assignments,
         metrics: {
           p,
-          candidateIndex: index + 1,
+          low,
+          mid,
+          high,
           candidateCount: candidateValues.length,
+          candidateIndex: mid,
           lambdaValue,
           facilityCount: feasibility.facilityCount,
           feasible: feasibility.feasible,
+          decision,
         },
         overlays: {
           mode: 'pcenter_feasibility',
           totalLength: feasibility.totalLength,
           intervals: feasibility.intervals,
           facilityPositions: feasibility.facilityPositions,
+          activeIntervalId: feasibility.failureIntervalId,
+          candidateValues,
         },
         explanation:
-          `Testing candidate λ = ${lambdaValue}.\n` +
-          `Facilities used by feasibility test: ${feasibility.facilityCount}.\n` +
-          `Result: ${feasibility.feasible ? 'feasible' : 'not feasible'}.`,
+          `Binary-search test at index ${mid} with λ = ${lambdaValue}.\n` +
+          `Feasibility result: ${feasibility.feasible ? 'feasible' : 'infeasible'}.\n` +
+          (
+            feasibility.feasible
+              ? `Since λ is feasible, search the left half for a smaller feasible value.`
+              : `Since λ is infeasible, search the right half for a larger value.`
+          ),
       })
     );
 
@@ -84,27 +106,38 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
       steps.push(
         createSnapshot({
           type: STEP_TYPES.UPDATE_BEST,
-          phase: 'first_feasible_found',
+          phase: 'update_best_lambda',
           selected: feasibility.facilityNodeIds,
           covered: feasibility.coveredNodeIds,
+          assignments: feasibility.assignments,
           metrics: {
             p,
+            low,
+            mid,
+            high,
             lambdaValue,
+            candidateIndex: mid,
             facilityCount: feasibility.facilityCount,
-            candidateIndex: index + 1,
+            feasible: true,
+            decision: 'record_and_move_left',
           },
           overlays: {
             mode: 'pcenter_feasibility',
             totalLength: feasibility.totalLength,
             intervals: feasibility.intervals,
             facilityPositions: feasibility.facilityPositions,
+            activeIntervalId: null,
+            candidateValues,
           },
           explanation:
-            `This is the first feasible candidate in sorted order, so it is the optimal discrete λ.`,
+            `Current λ = ${lambdaValue} is feasible, so record it as the best answer so far.\n` +
+            `Continue searching left to see whether an even smaller feasible λ exists.`,
         })
       );
 
-      break;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
     }
   }
 
@@ -114,10 +147,13 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
       phase: 'finish',
       selected: bestResult?.facilityNodeIds ?? [],
       covered: bestResult?.coveredNodeIds ?? [],
+      assignments: bestResult?.assignments ?? {},
       metrics: {
         p,
         optimalLambda: bestResult?.lambdaValue ?? null,
         facilityCount: bestResult?.facilityCount ?? null,
+        low,
+        high,
       },
       overlays: bestResult
         ? {
@@ -125,12 +161,15 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
             totalLength: bestResult.totalLength,
             intervals: bestResult.intervals,
             facilityPositions: bestResult.facilityPositions,
+            candidateValues,
           }
-        : {},
+        : {
+            candidateValues,
+          },
       explanation:
         bestResult
-          ? `Candidate search finished.\nOptimal discrete λ = ${bestResult.lambdaValue}.\nOne feasible facility set found: { ${bestResult.facilityNodeIds.join(', ')} }.`
-          : `Candidate search finished, but no feasible candidate λ was found.`,
+          ? `Binary search finished.\nOptimal discrete λ = ${bestResult.lambdaValue}.\nOne greedy-feasible facility set is { ${bestResult.facilityNodeIds.join(', ')} }.`
+          : `Binary search finished, but no feasible candidate λ was found.`,
     })
   );
 

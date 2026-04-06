@@ -1,32 +1,10 @@
 import { STEP_TYPES } from '../../config/stepTypes';
 import { createSnapshot } from '../../core/snapshot';
-import {
-  computeMaxAssignmentCost,
-  getAssignments,
-} from '../shared/assignments';
-
-function combinations(array, k) {
-  const result = [];
-
-  function backtrack(start, current) {
-    if (current.length === k) {
-      result.push([...current]);
-      return;
-    }
-
-    for (let i = start; i < array.length; i++) {
-      current.push(array[i]);
-      backtrack(i + 1, current);
-      current.pop();
-    }
-  }
-
-  backtrack(0, []);
-  return result;
-}
+import { getAssignments } from '../shared/assignments';
 
 function getOrderedPathData(graph) {
   const { nodes, edges } = graph;
+
   const orderedNodes = [...nodes].sort((a, b) =>
     String(a.id).localeCompare(String(b.id))
   );
@@ -57,47 +35,25 @@ function getOrderedPathData(graph) {
 }
 
 function buildDemandIntervals(orderedNodes, lambdaValue) {
-  return orderedNodes.map((node) => {
-    const weight = node.weight ?? 1;
-    const radius = weight > 0 ? lambdaValue / weight : Infinity;
+  return orderedNodes
+    .map((node) => {
+      const weight = node.weight ?? 1;
+      const radius = weight > 0 ? lambdaValue / weight : Infinity;
 
-    return {
-      id: node.id,
-      center: node.pathPosition,
-      radius,
-      left: node.pathPosition - radius,
-      right: node.pathPosition + radius,
-      weight,
-    };
-  });
-}
-
-function buildScoreboard(entries, bestKey) {
-  return entries
-    .slice()
+      return {
+        id: node.id,
+        center: node.pathPosition,
+        radius,
+        left: node.pathPosition - radius,
+        right: node.pathPosition + radius,
+        weight,
+      };
+    })
     .sort((a, b) => {
-      if (a.feasible !== b.feasible) return a.feasible ? -1 : 1;
-      if (a.maxCost !== b.maxCost) return a.maxCost - b.maxCost;
-      return a.id.localeCompare(b.id);
-    })
-    .map((item) => ({
-      id: item.id,
-      score: item.maxCost,
-      isBest: item.id === bestKey,
-    }));
-}
-
-function comboLabel(combo) {
-  return combo.join(', ');
-}
-
-function computeCoveredNodeIds(nodes, assignments, lambdaValue) {
-  return nodes
-    .filter((node) => {
-      const cost = assignments[node.id]?.cost ?? Infinity;
-      return cost <= lambdaValue;
-    })
-    .map((node) => node.id);
+      if (a.left !== b.left) return a.left - b.left;
+      if (a.right !== b.right) return a.right - b.right;
+      return String(a.id).localeCompare(String(b.id));
+    });
 }
 
 function buildFacilityPositions(orderedNodes, facilityNodeIds) {
@@ -110,6 +66,55 @@ function buildFacilityPositions(orderedNodes, facilityNodeIds) {
     .filter((value) => Number.isFinite(value));
 }
 
+function getRightmostFeasibleNode(interval, orderedNodes) {
+  let bestNode = null;
+
+  for (const node of orderedNodes) {
+    const x = node.pathPosition;
+    if (x >= interval.left && x <= interval.right) {
+      if (!bestNode || x > bestNode.pathPosition) {
+        bestNode = node;
+      }
+    }
+  }
+
+  return bestNode;
+}
+
+function getCoveredIntervalIds(intervals, facilityPosition) {
+  return intervals
+    .filter(
+      (interval) =>
+        facilityPosition >= interval.left && facilityPosition <= interval.right
+    )
+    .map((interval) => interval.id);
+}
+
+function buildCoveredNodeIds(nodes, assignments, lambdaValue) {
+  return nodes
+    .filter((node) => (assignments[node.id]?.cost ?? Infinity) <= lambdaValue)
+    .map((node) => node.id);
+}
+
+function buildExplanationForPlacement({
+  facilityId,
+  facilityPosition,
+  activeInterval,
+  newlyCovered,
+  usedFacilities,
+  p,
+}) {
+  return (
+    `Greedy feasibility step.\n` +
+    `The leftmost uncovered demand interval is for node ${activeInterval.id}: ` +
+    `[${activeInterval.left.toFixed(2)}, ${activeInterval.right.toFixed(2)}].\n` +
+    `Choose the rightmost available node inside this interval, which is facility ${facilityId} ` +
+    `at position ${facilityPosition.toFixed(2)}.\n` +
+    `This covers demand nodes: ${newlyCovered.length ? newlyCovered.join(', ') : '(none)'}.\n` +
+    `Facilities used so far: ${usedFacilities}/${p}.`
+  );
+}
+
 export function runPCenterFeasibilityTest(graph, params = {}) {
   const { nodes, distMatrix } = graph;
   const p = Math.max(1, Math.min(params.p ?? 2, nodes.length));
@@ -118,38 +123,87 @@ export function runPCenterFeasibilityTest(graph, params = {}) {
   const { orderedNodes, totalLength } = getOrderedPathData(graph);
   const intervals = buildDemandIntervals(orderedNodes, lambdaValue);
 
-  const nodeIds = nodes.map((node) => node.id);
-  const combos = combinations(nodeIds, p);
+  const coveredSet = new Set();
+  const facilityNodeIds = [];
+  const witnessSteps = [];
 
-  let bestWitnessCombo = null;
-  let bestWitnessAssignments = {};
-  let bestWitnessMaxCost = Infinity;
-  let bestCoveredNodeIds = [];
+  while (coveredSet.size < intervals.length && facilityNodeIds.length < p) {
+    const activeInterval = intervals.find((interval) => !coveredSet.has(interval.id));
 
-  for (const combo of combos) {
-    const assignments = getAssignments(nodes, combo, distMatrix);
-    const maxCost = computeMaxAssignmentCost(nodes, assignments);
+    if (!activeInterval) {
+      break;
+    }
 
-    if (maxCost <= lambdaValue) {
-      const label = comboLabel(combo);
+    const chosenNode = getRightmostFeasibleNode(activeInterval, orderedNodes);
 
+    if (!chosenNode) {
+      return {
+        p,
+        lambdaValue,
+        totalLength,
+        orderedNodes,
+        intervals,
+        facilityNodeIds,
+        facilityPositions: buildFacilityPositions(orderedNodes, facilityNodeIds),
+        coveredNodeIds: [],
+        facilityCount: facilityNodeIds.length,
+        feasible: false,
+        assignments: {},
+        witnessMaxCost: Infinity,
+        witnessSteps,
+        failureIntervalId: activeInterval.id,
+      };
+    }
+
+    facilityNodeIds.push(chosenNode.id);
+
+    const newlyCovered = [];
+    for (const interval of intervals) {
       if (
-        !bestWitnessCombo ||
-        maxCost < bestWitnessMaxCost ||
-        (maxCost === bestWitnessMaxCost &&
-          label.localeCompare(comboLabel(bestWitnessCombo)) < 0)
+        !coveredSet.has(interval.id) &&
+        chosenNode.pathPosition >= interval.left &&
+        chosenNode.pathPosition <= interval.right
       ) {
-        bestWitnessCombo = [...combo];
-        bestWitnessAssignments = assignments;
-        bestWitnessMaxCost = maxCost;
-        bestCoveredNodeIds = computeCoveredNodeIds(nodes, assignments, lambdaValue);
+        coveredSet.add(interval.id);
+        newlyCovered.push(interval.id);
       }
     }
+
+    witnessSteps.push({
+      activeIntervalId: activeInterval.id,
+      chosenFacilityId: chosenNode.id,
+      chosenFacilityPosition: chosenNode.pathPosition,
+      newlyCoveredIds: newlyCovered,
+      coveredIdsAfterStep: [...coveredSet],
+      facilityNodeIdsAfterStep: [...facilityNodeIds],
+      explanation: buildExplanationForPlacement({
+        facilityId: chosenNode.id,
+        facilityPosition: chosenNode.pathPosition,
+        activeInterval,
+        newlyCovered,
+        usedFacilities: facilityNodeIds.length,
+        p,
+      }),
+    });
   }
 
-  const feasible = Boolean(bestWitnessCombo);
-  const facilityNodeIds = bestWitnessCombo ?? [];
-  const facilityPositions = buildFacilityPositions(orderedNodes, facilityNodeIds);
+  const feasible = coveredSet.size === intervals.length && facilityNodeIds.length <= p;
+  const assignments = feasible ? getAssignments(nodes, facilityNodeIds, distMatrix) : {};
+  const coveredNodeIds = feasible
+    ? buildCoveredNodeIds(nodes, assignments, lambdaValue)
+    : [...coveredSet];
+
+  let witnessMaxCost = 0;
+  if (feasible) {
+    for (const node of nodes) {
+      const cost = assignments[node.id]?.cost ?? Infinity;
+      if (cost > witnessMaxCost) {
+        witnessMaxCost = cost;
+      }
+    }
+  } else {
+    witnessMaxCost = Infinity;
+  }
 
   return {
     p,
@@ -158,13 +212,16 @@ export function runPCenterFeasibilityTest(graph, params = {}) {
     orderedNodes,
     intervals,
     facilityNodeIds,
-    facilityPositions,
-    coveredNodeIds: bestCoveredNodeIds,
+    facilityPositions: buildFacilityPositions(orderedNodes, facilityNodeIds),
+    coveredNodeIds,
     facilityCount: facilityNodeIds.length,
     feasible,
-    assignments: bestWitnessAssignments,
-    witnessMaxCost: feasible ? bestWitnessMaxCost : Infinity,
-    combos,
+    assignments,
+    witnessMaxCost,
+    witnessSteps,
+    failureIntervalId: feasible
+      ? null
+      : intervals.find((interval) => !coveredSet.has(interval.id))?.id ?? null,
   };
 }
 
@@ -176,16 +233,7 @@ export function generatePCenterFeasibilityTestSteps(graph, params = {}) {
   const { orderedNodes, totalLength } = getOrderedPathData(graph);
   const intervals = buildDemandIntervals(orderedNodes, lambdaValue);
 
-  const nodeIds = nodes.map((node) => node.id);
-  const combos = combinations(nodeIds, p);
-
   const steps = [];
-  const scoreboardEntries = [];
-
-  let bestWitnessCombo = null;
-  let bestWitnessAssignments = {};
-  let bestWitnessMaxCost = Infinity;
-  let bestCoveredNodeIds = [];
 
   steps.push(
     createSnapshot({
@@ -198,7 +246,7 @@ export function generatePCenterFeasibilityTestSteps(graph, params = {}) {
       metrics: {
         p,
         lambdaValue,
-        facilityCount: p,
+        facilityCount: 0,
         coveredCount: 0,
         total: nodes.length,
         checked: 0,
@@ -209,148 +257,124 @@ export function generatePCenterFeasibilityTestSteps(graph, params = {}) {
         totalLength,
         intervals,
         facilityPositions: [],
+        activeIntervalId: null,
+        chosenFacilityId: null,
       },
       explanation:
-        `Initializing discrete λ-feasibility test for p-Center.\n` +
-        `Given λ = ${lambdaValue}, check whether there exists a size-${p} node set S such that max_i w_i d(i,S) ≤ λ.\n` +
-        `This version uses exact checking over all size-${p} node combinations, so it is correct for small graphs.`,
+        `Initializing greedy λ-feasibility test for p-Center.\n` +
+        `Given λ = ${lambdaValue}, convert each demand node into a feasible service interval on the path.\n` +
+        `Then scan from left to right and repeatedly place the next facility at the rightmost node that still covers the leftmost uncovered interval.`,
     })
   );
 
-  combos.forEach((combo, index) => {
-    const assignments = getAssignments(nodes, combo, distMatrix);
-    const maxCost = computeMaxAssignmentCost(nodes, assignments);
-    const coveredNodeIds = computeCoveredNodeIds(nodes, assignments, lambdaValue);
-    const feasible = maxCost <= lambdaValue;
-    const label = comboLabel(combo);
+  const result = runPCenterFeasibilityTest(graph, { p, lambdaValue });
 
-    scoreboardEntries.push({
-      id: label,
-      maxCost,
-      feasible,
-    });
+  result.witnessSteps.forEach((witnessStep, index) => {
+    const partialAssignments = getAssignments(
+      nodes,
+      witnessStep.facilityNodeIdsAfterStep,
+      distMatrix
+    );
 
     steps.push(
       createSnapshot({
-        type: STEP_TYPES.EVALUATE,
-        phase: 'evaluate_combo',
-        selected: [...combo],
-        assignments,
-        covered: coveredNodeIds,
-        scoreboard: buildScoreboard(
-          scoreboardEntries,
-          bestWitnessCombo ? comboLabel(bestWitnessCombo) : null
-        ),
+        type: STEP_TYPES.SELECT,
+        phase: 'greedy_place_facility',
+        selected: witnessStep.facilityNodeIdsAfterStep,
+        covered: witnessStep.coveredIdsAfterStep,
+        assignments: partialAssignments,
         metrics: {
           p,
           lambdaValue,
-          facilityCount: combo.length,
-          coveredCount: coveredNodeIds.length,
+          facilityCount: witnessStep.facilityNodeIdsAfterStep.length,
+          coveredCount: witnessStep.coveredIdsAfterStep.length,
           total: nodes.length,
           checked: index + 1,
-          totalCombos: combos.length,
-          maxCost,
-          feasible,
+          feasible: null,
+          usedFacilities: witnessStep.facilityNodeIdsAfterStep.length,
         },
         overlays: {
           mode: 'pcenter_feasibility',
           totalLength,
           intervals,
-          facilityPositions: buildFacilityPositions(orderedNodes, combo),
+          facilityPositions: buildFacilityPositions(
+            orderedNodes,
+            witnessStep.facilityNodeIdsAfterStep
+          ),
+          activeIntervalId: witnessStep.activeIntervalId,
+          chosenFacilityId: witnessStep.chosenFacilityId,
         },
-        explanation:
-          `Evaluate facility set { ${label} }.\n` +
-          `Worst weighted assignment cost = ${Number.isFinite(maxCost) ? maxCost.toFixed(0) : '∞'}.\n` +
-          `This candidate is ${feasible ? 'feasible' : 'not feasible'} for λ = ${lambdaValue}.`,
+        explanation: witnessStep.explanation,
       })
     );
-
-    if (
-      feasible &&
-      (!bestWitnessCombo ||
-        maxCost < bestWitnessMaxCost ||
-        (maxCost === bestWitnessMaxCost &&
-          label.localeCompare(comboLabel(bestWitnessCombo)) < 0))
-    ) {
-      bestWitnessCombo = [...combo];
-      bestWitnessAssignments = assignments;
-      bestWitnessMaxCost = maxCost;
-      bestCoveredNodeIds = [...coveredNodeIds];
-
-      steps.push(
-        createSnapshot({
-          type: STEP_TYPES.UPDATE_BEST,
-          phase: 'update_best_feasible',
-          selected: [...bestWitnessCombo],
-          assignments: bestWitnessAssignments,
-          covered: bestCoveredNodeIds,
-          scoreboard: buildScoreboard(
-            scoreboardEntries,
-            comboLabel(bestWitnessCombo)
-          ),
-          metrics: {
-            p,
-            lambdaValue,
-            facilityCount: bestWitnessCombo.length,
-            coveredCount: bestCoveredNodeIds.length,
-            total: nodes.length,
-            checked: index + 1,
-            totalCombos: combos.length,
-            maxCost: bestWitnessMaxCost,
-            feasible: true,
-          },
-          overlays: {
-            mode: 'pcenter_feasibility',
-            totalLength,
-            intervals,
-            facilityPositions: buildFacilityPositions(
-              orderedNodes,
-              bestWitnessCombo
-            ),
-          },
-          explanation:
-            `New best feasible witness found: { ${comboLabel(bestWitnessCombo)} }.\n` +
-            `Its worst weighted assignment cost is ${bestWitnessMaxCost.toFixed(0)}, which satisfies λ = ${lambdaValue}.`,
-        })
-      );
-    }
   });
 
-  steps.push(
-    createSnapshot({
-      type: STEP_TYPES.FINISH,
-      phase: 'finish',
-      selected: bestWitnessCombo ?? [],
-      assignments: bestWitnessAssignments,
-      covered: bestCoveredNodeIds,
-      scoreboard: buildScoreboard(
-        scoreboardEntries,
-        bestWitnessCombo ? comboLabel(bestWitnessCombo) : null
-      ),
-      metrics: {
-        p,
-        lambdaValue,
-        facilityCount: bestWitnessCombo ? bestWitnessCombo.length : p,
-        coveredCount: bestCoveredNodeIds.length,
-        total: nodes.length,
-        checked: combos.length,
-        totalCombos: combos.length,
-        maxCost: bestWitnessCombo ? bestWitnessMaxCost : Infinity,
-        feasible: Boolean(bestWitnessCombo),
-      },
-      overlays: {
-        mode: 'pcenter_feasibility',
-        totalLength,
-        intervals,
-        facilityPositions: bestWitnessCombo
-          ? buildFacilityPositions(orderedNodes, bestWitnessCombo)
-          : [],
-      },
-      explanation: bestWitnessCombo
-        ? `Feasibility test finished.\nλ = ${lambdaValue} is feasible.\nOne best witness is { ${comboLabel(bestWitnessCombo)} } with worst weighted assignment cost ${bestWitnessMaxCost.toFixed(0)}.`
-        : `Feasibility test finished.\nλ = ${lambdaValue} is not feasible.\nNo size-${p} node set achieves max_i w_i d(i,S) ≤ ${lambdaValue}.`,
-    })
-  );
+  if (result.feasible) {
+    steps.push(
+      createSnapshot({
+        type: STEP_TYPES.FINISH,
+        phase: 'finish',
+        selected: result.facilityNodeIds,
+        covered: result.coveredNodeIds,
+        assignments: result.assignments,
+        scoreboard: [],
+        metrics: {
+          p,
+          lambdaValue,
+          facilityCount: result.facilityCount,
+          coveredCount: result.coveredNodeIds.length,
+          total: nodes.length,
+          feasible: true,
+          maxCost: result.witnessMaxCost,
+        },
+        overlays: {
+          mode: 'pcenter_feasibility',
+          totalLength: result.totalLength,
+          intervals: result.intervals,
+          facilityPositions: result.facilityPositions,
+          activeIntervalId: null,
+          chosenFacilityId: null,
+        },
+        explanation:
+          `Feasibility test finished.\n` +
+          `λ = ${lambdaValue} is feasible.\n` +
+          `Greedy selected facilities { ${result.facilityNodeIds.join(', ')} } using ${result.facilityCount} facilities.\n` +
+          `Worst weighted assignment cost = ${result.witnessMaxCost.toFixed(2)}.`,
+      })
+    );
+  } else {
+    steps.push(
+      createSnapshot({
+        type: STEP_TYPES.FINISH,
+        phase: 'finish',
+        selected: result.facilityNodeIds,
+        covered: result.coveredNodeIds,
+        assignments: {},
+        scoreboard: [],
+        metrics: {
+          p,
+          lambdaValue,
+          facilityCount: result.facilityCount,
+          coveredCount: result.coveredNodeIds.length,
+          total: nodes.length,
+          feasible: false,
+          maxCost: Infinity,
+        },
+        overlays: {
+          mode: 'pcenter_feasibility',
+          totalLength: result.totalLength,
+          intervals: result.intervals,
+          facilityPositions: result.facilityPositions,
+          activeIntervalId: result.failureIntervalId,
+          chosenFacilityId: null,
+        },
+        explanation:
+          `Feasibility test finished.\n` +
+          `λ = ${lambdaValue} is not feasible.\n` +
+          `The greedy test used ${result.facilityCount} facilities and still could not cover all demand intervals.`,
+      })
+    );
+  }
 
   return steps.map((step, index) => ({
     ...step,
