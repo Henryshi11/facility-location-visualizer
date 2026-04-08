@@ -445,9 +445,7 @@ export default function App() {
           <div style={headerStyle}>
             <div style={titleStyle}>Facility Location Visualizer</div>
             <div style={subtitleStyle}>
-              Interactive visualization for p-Median, p-Center, and Cost Covering.
-              Focused on exact baselines, greedy feasibility, and binary-search-style
-              parametric search on path graphs.
+              
             </div>
           </div>
 
@@ -458,7 +456,7 @@ export default function App() {
               onClick={() => setThemeName('dark')}
             >
               <MoonIcon color={themeName === 'dark' ? '#ffffff' : theme.bodyText} />
-              Dark
+              
             </button>
             <button
               type="button"
@@ -466,7 +464,7 @@ export default function App() {
               onClick={() => setThemeName('neumorphism')}
             >
               <SunIcon color={themeName === 'neumorphism' ? '#ffffff' : theme.bodyText} />
-              Neumorphism
+              
             </button>
           </div>
         </div>
