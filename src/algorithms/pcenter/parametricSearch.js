@@ -45,9 +45,9 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
         candidateValues,
       },
       explanation:
-        `Initializing binary-search parametric search for p-Center.\n` +
+        `Initializing binary-search parametric search for discrete p-Center.\n` +
         `Candidate λ values are generated from weighted node-to-node costs w_i d(i,j).\n` +
-        `Because feasibility is monotone in λ, we can binary search for the smallest feasible λ.`,
+        `Because feasibility is monotone in λ, we binary search for the smallest feasible λ in the node-restricted model.`,
     })
   );
 
@@ -91,11 +91,11 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
         },
         explanation:
           `Binary-search test at index ${mid} with λ = ${lambdaValue}.\n` +
-          `Feasibility result: ${feasibility.feasible ? 'feasible' : 'infeasible'}.\n` +
+          `Discrete feasibility result: ${feasibility.feasible ? 'feasible' : 'infeasible'}.\n` +
           (
             feasibility.feasible
-              ? `Since λ is feasible, search the left half for a smaller feasible value.`
-              : `Since λ is infeasible, search the right half for a larger value.`
+              ? `Since λ is feasible, continue searching the left half for a smaller feasible value.`
+              : `Since λ is infeasible, continue searching the right half for a larger value.`
           ),
       })
     );
@@ -130,8 +130,8 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
             candidateValues,
           },
           explanation:
-            `Current λ = ${lambdaValue} is feasible, so record it as the best answer so far.\n` +
-            `Continue searching left to see whether an even smaller feasible λ exists.`,
+            `Current λ = ${lambdaValue} is feasible in the discrete model, so record it as the best answer so far.\n` +
+            `Continue searching left to check whether an even smaller feasible λ exists.`,
         })
       );
 
@@ -168,7 +168,7 @@ export function generatePCenterParametricSearchSteps(graph, params = {}) {
           },
       explanation:
         bestResult
-          ? `Binary search finished.\nOptimal discrete λ = ${bestResult.lambdaValue}.\nOne greedy-feasible facility set is { ${bestResult.facilityNodeIds.join(', ')} }.`
+          ? `Binary search finished.\nOptimal discrete λ = ${bestResult.lambdaValue}.\nOne discrete greedy-feasible facility set is { ${bestResult.facilityNodeIds.join(', ')} }.`
           : `Binary search finished, but no feasible candidate λ was found.`,
     })
   );
