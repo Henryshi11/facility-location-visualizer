@@ -70,57 +70,44 @@ function intervalContainsPoint(interval, x) {
   return x >= interval.left && x <= interval.right;
 }
 
-function getCandidateNodesInsideInterval(activeInterval, orderedNodes) {
-  return orderedNodes.filter((node) =>
-    intervalContainsPoint(activeInterval, node.pathPosition)
+function getCandidateNodeIdsForInterval(interval, orderedNodes) {
+  return orderedNodes
+    .filter((node) => intervalContainsPoint(interval, node.pathPosition))
+    .map((node) => node.id);
+}
+
+function intersectNodeIdLists(a, b) {
+  const bSet = new Set(b);
+  return a.filter((id) => bSet.has(id));
+}
+
+function chooseRightmostNodeFromIds(nodeIds, orderedNodes) {
+  const posMap = new Map(
+    orderedNodes.map((node) => [node.id, node.pathPosition])
   );
-}
 
-function getNewlyCoveredIds(intervals, coveredSet, facilityPosition) {
-  const newlyCovered = [];
+  let bestId = null;
+  let bestPos = -Infinity;
 
-  for (const interval of intervals) {
-    if (!coveredSet.has(interval.id) && intervalContainsPoint(interval, facilityPosition)) {
-      newlyCovered.push(interval.id);
+  for (const id of nodeIds) {
+    const pos = posMap.get(id);
+    if (
+      bestId === null ||
+      pos > bestPos ||
+      (pos === bestPos && String(id).localeCompare(String(bestId)) < 0)
+    ) {
+      bestId = id;
+      bestPos = pos;
     }
   }
 
-  return newlyCovered;
+  return orderedNodes.find((node) => node.id === bestId) ?? null;
 }
 
-function chooseBestDiscreteNode(activeInterval, intervals, coveredSet, orderedNodes) {
-  const candidates = getCandidateNodesInsideInterval(activeInterval, orderedNodes);
-
-  if (!candidates.length) {
-    return null;
-  }
-
-  let bestNode = null;
-  let bestCoveredIds = [];
-
-  for (const node of candidates) {
-    const coveredIds = getNewlyCoveredIds(intervals, coveredSet, node.pathPosition);
-
-    const better =
-      !bestNode ||
-      coveredIds.length > bestCoveredIds.length ||
-      (coveredIds.length === bestCoveredIds.length &&
-        node.pathPosition > bestNode.pathPosition) ||
-      (coveredIds.length === bestCoveredIds.length &&
-        node.pathPosition === bestNode.pathPosition &&
-        String(node.id).localeCompare(String(bestNode.id)) < 0);
-
-    if (better) {
-      bestNode = node;
-      bestCoveredIds = coveredIds;
-    }
-  }
-
-  return {
-    node: bestNode,
-    coveredIds: bestCoveredIds,
-    candidateCount: candidates.length,
-  };
+function getCoveredIntervalIds(intervals, facilityPosition) {
+  return intervals
+    .filter((interval) => intervalContainsPoint(interval, facilityPosition))
+    .map((interval) => interval.id);
 }
 
 function buildCoveredNodeIds(nodes, assignments, lambdaValue) {
@@ -130,20 +117,20 @@ function buildCoveredNodeIds(nodes, assignments, lambdaValue) {
 }
 
 function buildExplanationForPlacement({
-  activeInterval,
+  startInterval,
+  packedIntervalIds,
+  candidateNodeIds,
   chosenNode,
-  newlyCovered,
   usedFacilities,
   p,
-  candidateCount,
 }) {
   return (
-    `Discrete greedy feasibility step.\n` +
-    `The leftmost uncovered demand interval is for node ${activeInterval.id}: ` +
-    `[${activeInterval.left.toFixed(2)}, ${activeInterval.right.toFixed(2)}].\n` +
-    `Among the ${candidateCount} node(s) inside this interval, choose node ${chosenNode.id} ` +
-    `at position ${chosenNode.pathPosition.toFixed(2)} because it covers the most remaining intervals.\n` +
-    `Newly covered demand nodes: ${newlyCovered.length ? newlyCovered.join(', ') : '(none)'}.\n` +
+    `Discrete intersection-based feasibility step.\n` +
+    `Start from the leftmost uncovered interval ${startInterval.id}.\n` +
+    `Expand rightward while the intervals still share at least one common feasible node.\n` +
+    `Packed intervals: ${packedIntervalIds.join(', ')}.\n` +
+    `Common feasible nodes: ${candidateNodeIds.join(', ')}.\n` +
+    `Choose the rightmost common node ${chosenNode.id} at position ${chosenNode.pathPosition.toFixed(2)}.\n` +
     `Facilities used so far: ${usedFacilities}/${p}.`
   );
 }
@@ -161,20 +148,17 @@ export function runPCenterFeasibilityTest(graph, params = {}) {
   const witnessSteps = [];
 
   while (coveredSet.size < intervals.length && facilityNodeIds.length < p) {
-    const activeInterval = intervals.find((interval) => !coveredSet.has(interval.id));
+    const startIndex = intervals.findIndex((interval) => !coveredSet.has(interval.id));
 
-    if (!activeInterval) {
+    if (startIndex === -1) {
       break;
     }
 
-    const choice = chooseBestDiscreteNode(
-      activeInterval,
-      intervals,
-      coveredSet,
-      orderedNodes
-    );
+    const startInterval = intervals[startIndex];
+    let packedIntervalIds = [startInterval.id];
+    let currentCandidateNodeIds = getCandidateNodeIdsForInterval(startInterval, orderedNodes);
 
-    if (!choice || !choice.node) {
+    if (!currentCandidateNodeIds.length) {
       return {
         p,
         lambdaValue,
@@ -189,33 +173,76 @@ export function runPCenterFeasibilityTest(graph, params = {}) {
         assignments: {},
         witnessMaxCost: Infinity,
         witnessSteps,
-        failureIntervalId: activeInterval.id,
+        failureIntervalId: startInterval.id,
       };
     }
 
-    const chosenNode = choice.node;
-    const newlyCovered = choice.coveredIds;
+    let scanIndex = startIndex + 1;
+
+    while (scanIndex < intervals.length) {
+      const nextInterval = intervals[scanIndex];
+
+      if (coveredSet.has(nextInterval.id)) {
+        scanIndex += 1;
+        continue;
+      }
+
+      const nextCandidateNodeIds = getCandidateNodeIdsForInterval(nextInterval, orderedNodes);
+      const intersection = intersectNodeIdLists(currentCandidateNodeIds, nextCandidateNodeIds);
+
+      if (!intersection.length) {
+        break;
+      }
+
+      currentCandidateNodeIds = intersection;
+      packedIntervalIds.push(nextInterval.id);
+      scanIndex += 1;
+    }
+
+    const chosenNode = chooseRightmostNodeFromIds(currentCandidateNodeIds, orderedNodes);
+
+    if (!chosenNode) {
+      return {
+        p,
+        lambdaValue,
+        totalLength,
+        orderedNodes,
+        intervals,
+        facilityNodeIds,
+        facilityPositions: buildFacilityPositions(orderedNodes, facilityNodeIds),
+        coveredNodeIds: [],
+        facilityCount: facilityNodeIds.length,
+        feasible: false,
+        assignments: {},
+        witnessMaxCost: Infinity,
+        witnessSteps,
+        failureIntervalId: startInterval.id,
+      };
+    }
 
     facilityNodeIds.push(chosenNode.id);
 
+    const newlyCovered = getCoveredIntervalIds(intervals, chosenNode.pathPosition);
     for (const intervalId of newlyCovered) {
       coveredSet.add(intervalId);
     }
 
     witnessSteps.push({
-      activeIntervalId: activeInterval.id,
+      activeIntervalId: startInterval.id,
       chosenFacilityId: chosenNode.id,
       chosenFacilityPosition: chosenNode.pathPosition,
       newlyCoveredIds: [...newlyCovered],
+      packedIntervalIds: [...packedIntervalIds],
+      commonCandidateNodeIds: [...currentCandidateNodeIds],
       coveredIdsAfterStep: [...coveredSet],
       facilityNodeIdsAfterStep: [...facilityNodeIds],
       explanation: buildExplanationForPlacement({
-        activeInterval,
+        startInterval,
+        packedIntervalIds,
+        candidateNodeIds: currentCandidateNodeIds,
         chosenNode,
-        newlyCovered,
         usedFacilities: facilityNodeIds.length,
         p,
-        candidateCount: choice.candidateCount,
       }),
     });
   }
@@ -263,8 +290,8 @@ export function generatePCenterFeasibilityTestSteps(graph, params = {}) {
   const p = Math.max(1, Math.min(params.p ?? 2, nodes.length));
   const lambdaValue = Math.max(0, params.lambdaValue ?? 30);
 
-  const { orderedNodes, totalLength } = getOrderedPathData(graph);
-  const intervals = buildDemandIntervals(orderedNodes, lambdaValue);
+  const { totalLength } = getOrderedPathData(graph);
+  const result = runPCenterFeasibilityTest(graph, { p, lambdaValue });
 
   const steps = [];
 
@@ -288,19 +315,17 @@ export function generatePCenterFeasibilityTestSteps(graph, params = {}) {
       overlays: {
         mode: 'pcenter_feasibility',
         totalLength,
-        intervals,
+        intervals: result.intervals,
         facilityPositions: [],
         activeIntervalId: null,
         chosenFacilityId: null,
       },
       explanation:
         `Initializing discrete λ-feasibility test for p-Center.\n` +
-        `Given λ = ${lambdaValue}, convert each demand node into a feasible service interval on the path.\n` +
-        `Then repeatedly take the leftmost uncovered interval and choose a node inside it that covers the most remaining intervals.`,
+        `Given λ = ${lambdaValue}, convert each demand node into a feasible interval.\n` +
+        `Then start from the leftmost uncovered interval and expand rightward while the intervals still share a common feasible node.`,
     })
   );
-
-  const result = runPCenterFeasibilityTest(graph, { p, lambdaValue });
 
   result.witnessSteps.forEach((witnessStep, index) => {
     const partialAssignments = getAssignments(
@@ -312,7 +337,7 @@ export function generatePCenterFeasibilityTestSteps(graph, params = {}) {
     steps.push(
       createSnapshot({
         type: STEP_TYPES.SELECT,
-        phase: 'greedy_place_facility',
+        phase: 'intersection_pack_and_place',
         selected: witnessStep.facilityNodeIdsAfterStep,
         covered: witnessStep.coveredIdsAfterStep,
         assignments: partialAssignments,
@@ -329,9 +354,9 @@ export function generatePCenterFeasibilityTestSteps(graph, params = {}) {
         overlays: {
           mode: 'pcenter_feasibility',
           totalLength,
-          intervals,
+          intervals: result.intervals,
           facilityPositions: buildFacilityPositions(
-            orderedNodes,
+            result.orderedNodes,
             witnessStep.facilityNodeIdsAfterStep
           ),
           activeIntervalId: witnessStep.activeIntervalId,
@@ -404,7 +429,7 @@ export function generatePCenterFeasibilityTestSteps(graph, params = {}) {
         explanation:
           `Feasibility test finished.\n` +
           `λ = ${lambdaValue} is not feasible in the discrete node-restricted model.\n` +
-          `The greedy test used ${result.facilityCount} facilities and still could not cover all demand intervals.`,
+          `The intersection-based greedy test used ${result.facilityCount} facilities and still could not cover all demand intervals.`,
       })
     );
   }
