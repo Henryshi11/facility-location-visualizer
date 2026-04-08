@@ -1,137 +1,218 @@
-# Facility Location Visualizer
+# Facility Location Visualizer (p-Center)
 
-A visual and interactive tool for understanding core facility location algorithms.
-Built for coursework review and final project demonstration.
+An interactive visualization tool for understanding the **p-Center problem** using:
 
----
+- Discrete node-restricted model
+- Parametric search
+- Interval-based feasibility test
 
-## Features
-
-* Step-by-step algorithm visualization
-* Supports **p-Median**, **p-Center**, and **Cost Covering**
-* Snapshot-based simulation system
-* Random graph generation
-* Dark / Neumorphism themes
-* Clear explanation of **algorithm decisions and search steps**
+Designed for algorithm learning, coursework demonstration, and step-by-step explanation.
 
 ---
 
-## Supported Models
+#  Problem Definition
 
-### 1. p-Median
+Given:
 
-Choose ( p ) facilities to minimize total weighted cost:
+- A set of nodes $V$
+- Each node $i$ has a weight $w_i$
+- A path metric distance $d(i,j)$
+- A number of facilities $p$
 
-$$
-\min_{|F| = p} \sum_i w_i , d(i, F)
-$$
-
----
-
-### 2. p-Center
-
-Choose ( p ) facilities to minimize the worst weighted cost:
+We want to choose a set of facilities $F \subseteq V$, $|F| = p$, such that:
 
 $$
-\min_{|F| = p} \max_i w_i , d(i, F)
+\min_{|F| = p} \max_{i \in V} \; w_i \cdot d(i, F)
+$$
+
+where:
+
+$$
+d(i, F) = \min_{j \in F} d(i, j)
 $$
 
 ---
 
-### 3. Cost Covering
+#  Core Idea
 
-Given a threshold ( \lambda ), open as few facilities as possible such that:
+We solve p-Center using:
+
+### 1. Parametric Search
+
+Convert optimization into decision:
+
+> Given $\lambda$, can we cover all nodes using at most $p$ facilities?
+
+---
+
+### 2. Discrete Feasibility Transformation
+
+Each node $i$ becomes an interval:
 
 $$
-w_i , d(i, F) \le \lambda \quad \forall i
+\left[x_i - \frac{\lambda}{w_i}, \; x_i + \frac{\lambda}{w_i} \right]
 $$
 
+This means:
+
+> A facility must be placed inside this interval to cover node $i$
+
+---
+
+### 3. Critical Interval Reduction
+
+Remove redundant intervals:
+
+- If one interval contains another, the larger one is removed
+
+After this:
+
+- Left endpoints are increasing
+- Right endpoints are increasing
+
+This ensures a valid greedy structure.
+
+---
+
+### 4. Discrete Node-Restricted Model
+
+Unlike the continuous version:
+
+> Facilities can only be placed on nodes
+
+So each interval corresponds to:
+
 $$
-\min |F|
+[L_i, R_i]
+$$
+
+which represents the **range of feasible node indices**
+
+---
+
+### 5. Intersection-Based Feasibility Test (O(n))
+
+We scan intervals from left to right:
+
+Maintain:
+
+$$
+\text{currentL} = \max L_i, \quad \text{currentR} = \min R_i
+$$
+
+If:
+
+$$
+\text{currentL} \le \text{currentR}
+$$
+
+→ intervals still overlap
+
+Otherwise:
+
+- Place a facility at **currentR (rightmost feasible node)**
+- Reset intersection
+
+---
+
+### Key Insight
+
+> A facility is placed only when the intersection becomes empty.
+
+This guarantees:
+
+- Correctness
+- Minimal number of facilities
+
+---
+
+# Why Choose the Rightmost Node?
+
+We always choose:
+
+$$
+\text{facility} = \text{rightmost feasible node}
+$$
+
+Reason:
+
+- Maximizes coverage to the right
+- Matches optimal greedy strategy on a path
+- Equivalent to classic interval stabbing
+
+---
+
+# Algorithm Pipeline
+
+1. Generate candidate values:
+
+$$
+\lambda = w_i \cdot d(i,j)
+$$
+
+2. Sort and deduplicate candidates
+
+3. Binary search over candidates
+
+4. For each $\lambda$:
+
+   - Build intervals
+   - Reduce to critical intervals
+   - Run feasibility test
+
+---
+
+# ⏱️ Complexity Analysis
+
+### Feasibility Test
+
+- Each interval processed once
+- Only boundary updates
+
+$$
+O(n)
 $$
 
 ---
 
-## Algorithms Implemented
+### Parametric Search
 
-### p-Median
+- Number of candidates: $O(n^2)$
+- Binary search: $O(\log n)$
+- Each test: $O(n)$
 
-* Exact brute-force (baseline, optimal for small graphs)
-
----
-
-### p-Center
-
-* **λ-Feasibility Test (Greedy, path-based)**
-
-  * Transforms each demand into an interval using $( \lambda / w_i )$
-  * Uses **left-to-right greedy covering** to test feasibility
-  * Represents the decision version of p-Center
-
-* **Parametric Search (Binary Search on λ)**
-
-  * Searches over discrete candidate values of $( \lambda )$
-  * Uses feasibility test as a decision oracle
-  * Exploits monotonicity:
-
-    * feasible → search smaller λ
-    * infeasible → search larger λ
-
-* Exact brute-force (verification baseline)
+$$
+O(n \log n) \text{ (search phase)}
+$$
 
 ---
 
-### Cost Covering
+### Total Complexity
 
-* Exact brute-force (minimum facility set under λ)
+Including candidate generation:
 
----
-
-## Key Ideas
-
-* All objectives use **weighted cost**:
-  $$[
-  w_i \cdot d(i, F)
-  ]$$
-
-* p-Center is solved via:
-
-  * **decision problem (feasibility test)**
-  * * **parametric search (binary search on λ)**
-
-* On path graphs:
-
-  * feasibility reduces to **interval covering**
-  * solved using a **greedy strategy**
+$$
+O(n^2 \log n)
+$$
 
 ---
 
+# Visualization Features
 
-
-## Project Structure
-
-```
-src/
-  algorithms/        # core algorithms (p-median, p-center, covering)
-  config/            # model and algorithm configuration
-  core/              # snapshot system
-  data/              # example graphs
-  features/          # simulation builder
-  graph/             # graph generation
-  render/            # canvas + themes
-```
+- Step-by-step feasibility simulation
+- Interval visualization on path
+- Binary search tracking (low / mid / high)
+- Facility placement animation
+- Coverage explanation
 
 ---
 
-## Run
+#  Key Insight Summary
 
-```bash
-npm install
-npm run dev
-```
+- p-Center can be solved via parametric search
+- Feasibility reduces to interval covering
+- Discrete version requires node-restricted placement
+- Intersection-based greedy is both correct and efficient
 
 ---
 
-
-* a personal course review tool
-* a demonstration of **optimization → decision → search** workflow
